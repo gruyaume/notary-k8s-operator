@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.ref == 'refs/heads/main' && format('ignore-main-{0}', github.run_id) || format('{0}-{1}', github.workflow, github.ref_name) }}
+  cancel-in-progress: true
+
+jobs:
+  go-unit-test:
+    uses: ./.github/workflows/go-unittest.yaml
+
+  go-vet:
+    uses: ./.github/workflows/go-vet.yaml
+
+  go-lint:
+    uses: ./.github/workflows/go-lint.yaml
+
+  charm-build:
+    needs:
+      - go-lint
+      - go-vet
+      - go-unit-test
+    uses: ./.github/workflows/charm-build.yaml
+    secrets: inherit
