@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/canonical/pebble/client"
 	"github.com/gruyaume/goops"
 	"github.com/gruyaume/goops/commands"
 	"gopkg.in/yaml.v3"
-
-	"github.com/canonical/pebble/client"
 )
 
 const (
@@ -27,16 +26,19 @@ type NotaryConfig struct {
 	PebbleNotifications bool   `yaml:"pebble_notifications"`
 }
 
-func pushConfigFile(hookContext *goops.HookContext, containerName string, path string) error {
+func pushConfigFile(containerName string, path string) error {
 	socketPath := "/charm/containers/" + containerName + "/pebble.socket"
+
 	pebble, err := client.New(&client.Config{Socket: socketPath})
 	if err != nil {
 		return fmt.Errorf("could not create pebble client: %w", err)
 	}
+
 	_, err = pebble.SysInfo()
 	if err != nil {
 		return fmt.Errorf("could not connect to pebble: %w", err)
 	}
+
 	notaryConfig := NotaryConfig{
 		KeyPath:             KeyPath,
 		CertPath:            CertPath,
@@ -44,34 +46,41 @@ func pushConfigFile(hookContext *goops.HookContext, containerName string, path s
 		Port:                2111,
 		PebbleNotifications: true,
 	}
+
 	d, err := yaml.Marshal(notaryConfig)
 	if err != nil {
 		return fmt.Errorf("could not marshal config to YAML: %w", err)
 	}
+
 	source := strings.NewReader(string(d))
 	pushOptions := &client.PushOptions{
 		Source: source,
 		Path:   path,
 	}
+
 	err = pebble.Push(pushOptions)
 	if err != nil {
 		return fmt.Errorf("could not push config file: %w", err)
 	}
+
 	return nil
 }
 
 func setPorts(hookContext *goops.HookContext) error {
-	ports := []commands.Port{
-		{
-			Port:     Port,
-			Protocol: "tcp",
+	setPortOpts := &commands.SetPortsOptions{
+		Ports: []*commands.Port{
+			{
+				Port:     Port,
+				Protocol: "tcp",
+			},
 		},
 	}
 
-	err := hookContext.Commands.SetPorts(ports)
+	err := hookContext.Commands.SetPorts(setPortOpts)
 	if err != nil {
 		return fmt.Errorf("could not set ports: %w", err)
 	}
+
 	return nil
 }
 
@@ -81,6 +90,7 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 		hookContext.Commands.JujuLog(commands.Error, "Could not check if unit is leader:", err.Error())
 		return
 	}
+
 	if !isLeader {
 		hookContext.Commands.JujuLog(commands.Warning, "Unit is not leader")
 		return
@@ -91,23 +101,33 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 		hookContext.Commands.JujuLog(commands.Error, "Could not set ports:", err.Error())
 		return
 	}
+
 	hookContext.Commands.JujuLog(commands.Info, "Ports set")
 
-	err = pushConfigFile(hookContext, "notary", "/etc/notary/config/notary.yaml")
+	err = pushConfigFile("notary", "/etc/notary/config/notary.yaml")
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Error, "Could not push config file:", err.Error())
 		return
 	}
+
 	hookContext.Commands.JujuLog(commands.Info, "Config file pushed")
 }
 
 func SetStatus(hookContext *goops.HookContext) {
-	var status = commands.StatusActive
-	var message = ""
-	err := hookContext.Commands.StatusSet(status, message)
+	status := commands.StatusActive
+
+	message := ""
+
+	statusSetOpts := &commands.StatusSetOptions{
+		Name:    status,
+		Message: message,
+	}
+
+	err := hookContext.Commands.StatusSet(statusSetOpts)
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Error, "Could not set status:", err.Error())
 		return
 	}
+
 	hookContext.Commands.JujuLog(commands.Info, "Status set to active")
 }
