@@ -10,6 +10,7 @@ import (
 func main() {
 	hookContext := goops.NewHookContext()
 	hookName := hookContext.Environment.JujuHookName()
+
 	if hookName != "" {
 		charm.HandleDefaultHook(hookContext)
 		charm.SetStatus(hookContext)
