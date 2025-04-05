@@ -67,7 +67,7 @@ func pushConfigFile(containerName string, path string) error {
 }
 
 func setPorts(hookContext *goops.HookContext) error {
-	setPortOpts := &commands.SetPortOptions{
+	setPortOpts := &commands.SetPortsOptions{
 		Ports: []*commands.Port{
 			{
 				Port:     Port,
@@ -118,7 +118,7 @@ func SetStatus(hookContext *goops.HookContext) {
 
 	message := ""
 
-	statusSetOpts := &commands.StatusGetOptions{
+	statusSetOpts := &commands.StatusSetOptions{
 		Name:    status,
 		Message: message,
 	}
