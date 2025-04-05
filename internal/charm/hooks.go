@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/canonical/pebble/client"
 	"github.com/gruyaume/goops"
 	"github.com/gruyaume/goops/commands"
 	"gopkg.in/yaml.v3"
-
-	"github.com/canonical/pebble/client"
 )
 
 const (
@@ -115,9 +114,9 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 }
 
 func SetStatus(hookContext *goops.HookContext) {
-	var status = commands.StatusActive
+	status := commands.StatusActive
 
-	var message = ""
+	message := ""
 
 	statusSetOpts := &commands.StatusGetOptions{
 		Name:    status,
