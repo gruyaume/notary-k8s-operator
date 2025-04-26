@@ -5,10 +5,12 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"strings"
 
 	"github.com/canonical/pebble/client"
 	"github.com/gruyaume/goops"
 	"github.com/gruyaume/goops/commands"
+	"github.com/gruyaume/notary-k8s/integrations/prometheus"
 	"github.com/gruyaume/notary-k8s/internal/notary"
 )
 
@@ -19,6 +21,7 @@ const (
 	APIPort                = 2111
 	CharmAccountUsername   = "charm@notary.com"
 	NotaryLoginSecretLabel = "NOTARY_LOGIN"
+	MetricsIntegrationName = "metrics"
 )
 
 func setPorts(hookContext *goops.HookContext) error {
@@ -49,6 +52,29 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 	if !isLeader {
 		hookContext.Commands.JujuLog(commands.Warning, "Unit is not leader")
 		return
+	}
+
+	prometheusIntegration := &prometheus.Integration{
+		HookContext:  hookContext,
+		RelationName: MetricsIntegrationName,
+		CharmName:    "notary-k8s",
+		Jobs: []*prometheus.Job{
+			{
+				Scheme:      "https",
+				TLSConfig:   prometheus.TLSConfig{InsecureSkipVerify: true},
+				MetricsPath: "/metrics",
+				StaticConfigs: []prometheus.StaticConfig{
+					{
+						Targets: []string{getHostname(hookContext)},
+					},
+				},
+			},
+		},
+	}
+
+	err = prometheusIntegration.Write()
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Info, "Could not write prometheus integration:", err.Error())
 	}
 
 	err = setPorts(hookContext)
@@ -249,4 +275,14 @@ func generateRandomPassword() (string, error) {
 	}
 
 	return string(b), nil
+}
+
+func getHostname(hookContext *goops.HookContext) string {
+	modelName := hookContext.Environment.JujuModelName()
+	unitName := hookContext.Environment.JujuUnitName()
+	appName := strings.Split(unitName, "/")[0]
+	unitNumber := strings.Split(unitName, "/")[1]
+	unitHostname := fmt.Sprintf("%s-%s.%s-endpoints.%s.svc.cluster.local:%d", appName, unitNumber, appName, modelName, APIPort)
+
+	return unitHostname
 }
