@@ -1,25 +1,30 @@
 package charm
 
 import (
+	"crypto/rand"
+	"crypto/tls"
 	"fmt"
 
 	"github.com/canonical/pebble/client"
 	"github.com/gruyaume/goops"
 	"github.com/gruyaume/goops/commands"
+	"github.com/gruyaume/notary-k8s/internal/notary"
 )
 
 const (
-	KeyPath    = "/etc/notary/config/key.pem"
-	CertPath   = "/etc/notary/config/cert.pem"
-	ConfigPath = "/etc/notary/config/notary.yaml"
-	Port       = 2111
+	KeyPath                = "/etc/notary/config/key.pem"
+	CertPath               = "/etc/notary/config/cert.pem"
+	ConfigPath             = "/etc/notary/config/notary.yaml"
+	APIPort                = 2111
+	CharmAccountUsername   = "charm@notary.com"
+	NotaryLoginSecretLabel = "NOTARY_LOGIN"
 )
 
 func setPorts(hookContext *goops.HookContext) error {
 	setPortOpts := &commands.SetPortsOptions{
 		Ports: []*commands.Port{
 			{
-				Port:     Port,
+				Port:     APIPort,
 				Protocol: "tcp",
 			},
 		},
@@ -94,13 +99,18 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Pebble service started")
+
+	err = createAdminAccount(hookContext)
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not create admin account:", err.Error())
+		return
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Admin account created")
 }
 
 func syncCertificate(hookContext *goops.HookContext, pebble *client.Client) error {
-	certContent, err := getFileContent(pebble, CertPath)
-	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not get certificate content:", err.Error())
-	}
+	certContent, _ := getFileContent(pebble, CertPath)
 
 	if certContent != "" {
 		hookContext.Commands.JujuLog(commands.Info, "Certificate already exists, skipping generation")
@@ -127,6 +137,7 @@ func syncCertificate(hookContext *goops.HookContext, pebble *client.Client) erro
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Key pushed")
+
 	return nil
 }
 
@@ -147,4 +158,89 @@ func SetStatus(hookContext *goops.HookContext) {
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Status set to active")
+}
+
+func createAdminAccount(hookContext *goops.HookContext) error {
+	clientConfig := &notary.Config{
+		BaseURL: "https://127.0.0.1:" + fmt.Sprint(APIPort),
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
+
+	client, err := notary.New(clientConfig)
+	if err != nil {
+		return fmt.Errorf("could not create notary client: %w", err)
+	}
+
+	status, err := client.GetStatus()
+	if err != nil {
+		return fmt.Errorf("could not get status: %w", err)
+	}
+
+	if status.Initialized {
+		return nil
+	}
+
+	// check if secret already exists
+	secret, _ := hookContext.Commands.SecretGet(&commands.SecretGetOptions{
+		Label: NotaryLoginSecretLabel,
+	})
+
+	var password string
+
+	if secret == nil {
+		password, err := generateRandomPassword()
+		if err != nil {
+			return fmt.Errorf("could not generate random password: %w", err)
+		}
+
+		secretAddOpts := &commands.SecretAddOptions{
+			Label: NotaryLoginSecretLabel,
+			Content: map[string]string{
+				"password": password,
+				"username": CharmAccountUsername,
+			},
+		}
+
+		_, err = hookContext.Commands.SecretAdd(secretAddOpts)
+		if err != nil {
+			return fmt.Errorf("could not add secret: %w", err)
+		}
+	} else {
+		password = secret["password"]
+	}
+
+	if password == "" {
+		return fmt.Errorf("could not get password from secret")
+	}
+
+	err = client.CreateAccount(&notary.CreateAccountOptions{
+		Username: CharmAccountUsername,
+		Password: password,
+	})
+	if err != nil {
+		return fmt.Errorf("could not create account: %w", err)
+	}
+
+	return nil
+}
+
+func generateRandomPassword() (string, error) {
+	const passwordLength = 16
+
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+	b := make([]byte, passwordLength)
+
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+
+	for i := range b {
+		b[i] = charset[b[i]%byte(len(charset))]
+	}
+
+	return string(b), nil
 }

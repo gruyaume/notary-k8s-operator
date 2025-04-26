@@ -52,10 +52,12 @@ func getFileContent(pebbleClient *client.Client, path string) (string, error) {
 		Path:   path,
 		Target: target,
 	}
+
 	err := pebbleClient.Pull(opts)
 	if err != nil {
 		return "", fmt.Errorf("could not get file content: %w", err)
 	}
+
 	return target.String(), nil
 }
 

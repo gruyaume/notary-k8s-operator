@@ -19,6 +19,7 @@ func generateCertificate() (certPEM string, keyPEM string, err error) {
 	}
 
 	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+
 	serial, err := rand.Int(rand.Reader, serialLimit)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to generate serial number: %w", err)
@@ -44,13 +45,17 @@ func generateCertificate() (certPEM string, keyPEM string, err error) {
 	}
 
 	certBuf := &bytes.Buffer{}
-	if err := pem.Encode(certBuf, &pem.Block{Type: "CERTIFICATE", Bytes: derCert}); err != nil {
+
+	err = pem.Encode(certBuf, &pem.Block{Type: "CERTIFICATE", Bytes: derCert})
+	if err != nil {
 		return "", "", fmt.Errorf("failed to PEM‐encode certificate: %w", err)
 	}
 
 	keyBuf := &bytes.Buffer{}
 	privBytes := x509.MarshalPKCS1PrivateKey(priv)
-	if err := pem.Encode(keyBuf, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes}); err != nil {
+
+	err = pem.Encode(keyBuf, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes})
+	if err != nil {
 		return "", "", fmt.Errorf("failed to PEM‐encode private key: %w", err)
 	}
 
