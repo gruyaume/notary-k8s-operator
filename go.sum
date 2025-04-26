@@ -2,8 +2,8 @@ github.com/canonical/pebble v1.20.0 h1:uzV42R3AfxL+oM75ScUHrGOnDCft5dmLvcwbOsLi2
 github.com/canonical/pebble v1.20.0/go.mod h1:4FuafBIWiGSLrvzlqtVrH+p94Anm5Qj5qElptozMZG8=
 github.com/gorilla/websocket v1.5.1 h1:gmztn0JnHVt9JZquRuzLw3g4wouNVzKL15iLr/zn/QY=
 github.com/gorilla/websocket v1.5.1/go.mod h1:x3kM2JMyaluk02fnUJpQuwD2dCS5NDG2ZHL0uE0tcaY=
-github.com/gruyaume/goops v0.0.10 h1:Voyh64iBmWCenLHG9GUagk+fyigSmxqyyfyydkUyPEQ=
-github.com/gruyaume/goops v0.0.10/go.mod h1:Ix0041QiQNrAVMiTRZCUtuApl2CskrGtru3HYKZhCfE=
+github.com/gruyaume/goops v0.0.11 h1:OK7elw0mhJsRK2c+P32xXw0LwyA93Fch393jCHA0xnU=
+github.com/gruyaume/goops v0.0.11/go.mod h1:91Pt2hUN92i9M74tYVJ1ASmCXV+5UtAnMGKlQmz/21g=
 github.com/kr/pretty v0.2.1 h1:Fmg33tUaq4/8ym9TJN1x7sLJnHVwhP33CNkpYV/7rwI=
 github.com/kr/pretty v0.2.1/go.mod h1:ipq/a2n7PKx3OHsz4KJII5eveXtPO4qwEXGdVfWzfnI=
 github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=

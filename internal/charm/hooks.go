@@ -10,6 +10,7 @@ import (
 	"github.com/canonical/pebble/client"
 	"github.com/gruyaume/goops"
 	"github.com/gruyaume/goops/commands"
+	"github.com/gruyaume/goops/metadata"
 	"github.com/gruyaume/notary-k8s/integrations/prometheus"
 	"github.com/gruyaume/notary-k8s/internal/notary"
 )
@@ -54,10 +55,16 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 		return
 	}
 
+	metadata, err := metadata.GetCharmMetadata(hookContext.Environment)
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not get charm metadata:", err.Error())
+		return
+	}
+
 	prometheusIntegration := &prometheus.Integration{
 		HookContext:  hookContext,
 		RelationName: MetricsIntegrationName,
-		CharmName:    "notary-k8s",
+		CharmName:    metadata.Name,
 		Jobs: []*prometheus.Job{
 			{
 				Scheme:      "https",
