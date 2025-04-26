@@ -1,6 +1,7 @@
 package charm
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -25,13 +26,13 @@ type PebbleLayer struct {
 	Services    map[string]ServiceConfig `yaml:"services"`
 }
 
-func pushConfigFile(pebbleClient *client.Client, config []byte, path string) error {
+func pushFile(pebbleClient *client.Client, content string, path string) error {
 	_, err := pebbleClient.SysInfo()
 	if err != nil {
 		return fmt.Errorf("could not connect to pebble: %w", err)
 	}
 
-	source := strings.NewReader(string(config))
+	source := strings.NewReader(content)
 	pushOptions := &client.PushOptions{
 		Source: source,
 		Path:   path,
@@ -39,10 +40,23 @@ func pushConfigFile(pebbleClient *client.Client, config []byte, path string) err
 
 	err = pebbleClient.Push(pushOptions)
 	if err != nil {
-		return fmt.Errorf("could not push config file: %w", err)
+		return fmt.Errorf("could not push file: %w", err)
 	}
 
 	return nil
+}
+
+func getFileContent(pebbleClient *client.Client, path string) (string, error) {
+	target := &bytes.Buffer{}
+	opts := &client.PullOptions{
+		Path:   path,
+		Target: target,
+	}
+	err := pebbleClient.Pull(opts)
+	if err != nil {
+		return "", fmt.Errorf("could not get file content: %w", err)
+	}
+	return target.String(), nil
 }
 
 func addPebbleLayer(pebbleClient *client.Client) error {
@@ -71,6 +85,19 @@ func addPebbleLayer(pebbleClient *client.Client) error {
 	err = pebbleClient.AddLayer(addLayerOpts)
 	if err != nil {
 		return fmt.Errorf("could not add pebble layer: %w", err)
+	}
+
+	return nil
+}
+
+func startPebbleService(pebbleClient *client.Client) error {
+	serviceOpts := &client.ServiceOptions{
+		Names: []string{"notary"},
+	}
+
+	_, err := pebbleClient.Start(serviceOpts)
+	if err != nil {
+		return fmt.Errorf("could not start pebble service: %w", err)
 	}
 
 	return nil

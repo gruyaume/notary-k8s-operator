@@ -11,24 +11,9 @@ import (
 const (
 	KeyPath    = "/etc/notary/config/key.pem"
 	CertPath   = "/etc/notary/config/cert.pem"
-	DBPath     = "/var/lib/notary/database/notary.db"
 	ConfigPath = "/etc/notary/config/notary.yaml"
 	Port       = 2111
 )
-
-type LoggingConfig struct {
-	Level  string `yaml:"level"`
-	Output string `yaml:"output"`
-}
-
-type NotaryConfig struct {
-	KeyPath             string        `yaml:"key_path"`
-	CertPath            string        `yaml:"cert_path"`
-	DBPath              string        `yaml:"db_path"`
-	Port                int           `yaml:"port"`
-	PebbleNotifications bool          `yaml:"pebble_notifications"`
-	Logging             LoggingConfig `yaml:"logging"`
-}
 
 func setPorts(hookContext *goops.HookContext) error {
 	setPortOpts := &commands.SetPortsOptions{
@@ -80,13 +65,19 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 		return
 	}
 
-	err = pushConfigFile(pebble, expectedConfig, "/etc/notary/config/notary.yaml")
+	err = pushFile(pebble, string(expectedConfig), "/etc/notary/config/notary.yaml")
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Error, "Could not push config file:", err.Error())
 		return
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Config file pushed")
+
+	err = syncCertificate(hookContext, pebble)
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not sync certificate:", err.Error())
+		return
+	}
 
 	err = addPebbleLayer(pebble)
 	if err != nil {
@@ -95,6 +86,48 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Pebble layer added")
+
+	err = startPebbleService(pebble)
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not start pebble service:", err.Error())
+		return
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Pebble service started")
+}
+
+func syncCertificate(hookContext *goops.HookContext, pebble *client.Client) error {
+	certContent, err := getFileContent(pebble, CertPath)
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not get certificate content:", err.Error())
+	}
+
+	if certContent != "" {
+		hookContext.Commands.JujuLog(commands.Info, "Certificate already exists, skipping generation")
+		return nil
+	}
+
+	cert, key, err := generateCertificate()
+	if err != nil {
+		return fmt.Errorf("could not generate certificate: %w", err)
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Certificate generated")
+
+	err = pushFile(pebble, cert, "/etc/notary/config/cert.pem")
+	if err != nil {
+		return fmt.Errorf("could not push certificate: %w", err)
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Certificate pushed")
+
+	err = pushFile(pebble, key, "/etc/notary/config/key.pem")
+	if err != nil {
+		return fmt.Errorf("could not push key: %w", err)
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Key pushed")
+	return nil
 }
 
 func SetStatus(hookContext *goops.HookContext) {
