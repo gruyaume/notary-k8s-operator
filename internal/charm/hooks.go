@@ -2,12 +2,10 @@ package charm
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/canonical/pebble/client"
 	"github.com/gruyaume/goops"
 	"github.com/gruyaume/goops/commands"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -18,52 +16,18 @@ const (
 	Port       = 2111
 )
 
-type NotaryConfig struct {
-	KeyPath             string `yaml:"key_path"`
-	CertPath            string `yaml:"cert_path"`
-	DBPath              string `yaml:"db_path"`
-	Port                int    `yaml:"port"`
-	PebbleNotifications bool   `yaml:"pebble_notifications"`
+type LoggingConfig struct {
+	Level  string `yaml:"level"`
+	Output string `yaml:"output"`
 }
 
-func pushConfigFile(containerName string, path string) error {
-	socketPath := "/charm/containers/" + containerName + "/pebble.socket"
-
-	pebble, err := client.New(&client.Config{Socket: socketPath})
-	if err != nil {
-		return fmt.Errorf("could not create pebble client: %w", err)
-	}
-
-	_, err = pebble.SysInfo()
-	if err != nil {
-		return fmt.Errorf("could not connect to pebble: %w", err)
-	}
-
-	notaryConfig := NotaryConfig{
-		KeyPath:             KeyPath,
-		CertPath:            CertPath,
-		DBPath:              DBPath,
-		Port:                2111,
-		PebbleNotifications: true,
-	}
-
-	d, err := yaml.Marshal(notaryConfig)
-	if err != nil {
-		return fmt.Errorf("could not marshal config to YAML: %w", err)
-	}
-
-	source := strings.NewReader(string(d))
-	pushOptions := &client.PushOptions{
-		Source: source,
-		Path:   path,
-	}
-
-	err = pebble.Push(pushOptions)
-	if err != nil {
-		return fmt.Errorf("could not push config file: %w", err)
-	}
-
-	return nil
+type NotaryConfig struct {
+	KeyPath             string        `yaml:"key_path"`
+	CertPath            string        `yaml:"cert_path"`
+	DBPath              string        `yaml:"db_path"`
+	Port                int           `yaml:"port"`
+	PebbleNotifications bool          `yaml:"pebble_notifications"`
+	Logging             LoggingConfig `yaml:"logging"`
 }
 
 func setPorts(hookContext *goops.HookContext) error {
@@ -104,13 +68,33 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 
 	hookContext.Commands.JujuLog(commands.Info, "Ports set")
 
-	err = pushConfigFile("notary", "/etc/notary/config/notary.yaml")
+	pebble, err := client.New(&client.Config{Socket: socketPath})
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not connect to pebble:", err.Error())
+		return
+	}
+
+	expectedConfig, err := getExpectedConfig()
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not get expected config:", err.Error())
+		return
+	}
+
+	err = pushConfigFile(pebble, expectedConfig, "/etc/notary/config/notary.yaml")
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Error, "Could not push config file:", err.Error())
 		return
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Config file pushed")
+
+	err = addPebbleLayer(pebble)
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not add pebble layer:", err.Error())
+		return
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Pebble layer added")
 }
 
 func SetStatus(hookContext *goops.HookContext) {
