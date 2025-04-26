@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net"
 	"time"
 )
 
@@ -29,14 +30,15 @@ func generateCertificate() (certPEM string, keyPEM string, err error) {
 		SerialNumber: serial,
 		Subject: pkix.Name{
 			Organization: []string{"Example Co"},
-			CommonName:   "example.com",
+			CommonName:   "127.0.0.1",
 		},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // 1 year
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
-		IsCA:                  true,
+		IsCA:                  false,
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
 	}
 
 	derCert, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)

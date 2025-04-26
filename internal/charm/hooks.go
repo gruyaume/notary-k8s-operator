@@ -3,6 +3,7 @@ package charm
 import (
 	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 
 	"github.com/canonical/pebble/client"
@@ -78,7 +79,7 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 
 	hookContext.Commands.JujuLog(commands.Info, "Config file pushed")
 
-	err = syncCertificate(hookContext, pebble)
+	cert, err := syncCertificate(hookContext, pebble)
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Error, "Could not sync certificate:", err.Error())
 		return
@@ -100,7 +101,7 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 
 	hookContext.Commands.JujuLog(commands.Info, "Pebble service started")
 
-	err = createAdminAccount(hookContext)
+	err = createAdminAccount(hookContext, cert)
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Error, "Could not create admin account:", err.Error())
 		return
@@ -109,36 +110,36 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 	hookContext.Commands.JujuLog(commands.Info, "Admin account created")
 }
 
-func syncCertificate(hookContext *goops.HookContext, pebble *client.Client) error {
+func syncCertificate(hookContext *goops.HookContext, pebble *client.Client) (string, error) {
 	certContent, _ := getFileContent(pebble, CertPath)
 
 	if certContent != "" {
 		hookContext.Commands.JujuLog(commands.Info, "Certificate already exists, skipping generation")
-		return nil
+		return certContent, nil
 	}
 
 	cert, key, err := generateCertificate()
 	if err != nil {
-		return fmt.Errorf("could not generate certificate: %w", err)
+		return "", fmt.Errorf("could not generate certificate: %w", err)
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Certificate generated")
 
 	err = pushFile(pebble, cert, "/etc/notary/config/cert.pem")
 	if err != nil {
-		return fmt.Errorf("could not push certificate: %w", err)
+		return "", fmt.Errorf("could not push certificate: %w", err)
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Certificate pushed")
 
 	err = pushFile(pebble, key, "/etc/notary/config/key.pem")
 	if err != nil {
-		return fmt.Errorf("could not push key: %w", err)
+		return "", fmt.Errorf("could not push key: %w", err)
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Key pushed")
 
-	return nil
+	return cert, nil
 }
 
 func SetStatus(hookContext *goops.HookContext) {
@@ -160,11 +161,16 @@ func SetStatus(hookContext *goops.HookContext) {
 	hookContext.Commands.JujuLog(commands.Info, "Status set to active")
 }
 
-func createAdminAccount(hookContext *goops.HookContext) error {
+func createAdminAccount(hookContext *goops.HookContext, certPEM string) error {
+	roots := x509.NewCertPool()
+	if ok := roots.AppendCertsFromPEM([]byte(certPEM)); !ok {
+		return fmt.Errorf("failed to parse root certificate PEM")
+	}
+
 	clientConfig := &notary.Config{
 		BaseURL: "https://127.0.0.1:" + fmt.Sprint(APIPort),
 		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true,
+			RootCAs: roots,
 		},
 	}
 
