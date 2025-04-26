@@ -113,7 +113,7 @@ func TestDeleteAccount_Success(t *testing.T) {
 		Requester: fake,
 	}
 	deleteAccountOpts := &notary.DeleteAccountOptions{
-		Username: "admin@ellanetworks.com",
+		Username: "admin@notary.com",
 	}
 
 	err := clientObj.DeleteAccount(deleteAccountOpts)
