@@ -47,3 +47,8 @@ resources:
 provides:
   metrics:
     interface: prometheus_scrape
+
+requires:
+  certificates:
+    interface: tls-certificates
+  

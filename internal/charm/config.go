@@ -14,6 +14,7 @@ type SystemLoggingConfig struct {
 	Level  string `yaml:"level"`
 	Output string `yaml:"output"`
 }
+
 type LoggingConfig struct {
 	System SystemLoggingConfig `yaml:"system"`
 }
