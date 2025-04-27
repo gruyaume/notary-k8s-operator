@@ -63,7 +63,11 @@ func (i *Integration) Request() error {
 		return fmt.Errorf("could not generate CSR: %w", err)
 	}
 
-	csrsBytes, err := json.Marshal(csr)
+	csrMap := map[string]string{
+		"certificate_signing_request": csr,
+	}
+
+	csrsBytes, err := json.Marshal([]map[string]string{csrMap})
 	if err != nil {
 		return fmt.Errorf("could not marshal scrape metadata to JSON: %w", err)
 	}
@@ -95,6 +99,22 @@ type ProviderCertificate struct {
 
 func (i *Integration) GetCertificate() (ProviderCertificate, error) {
 	return ProviderCertificate{}, nil
+}
+
+func (i *Integration) GetPrivateKey() (string, error) {
+	secret, err := i.HookContext.Commands.SecretGet(&commands.SecretGetOptions{
+		Label:   PrivateKeySecretLabel,
+		Refresh: true,
+	})
+	if err != nil {
+		return "", fmt.Errorf("cCould not get private key secret: %v", err)
+	}
+
+	if secret == nil {
+		return "", fmt.Errorf("secret is empty")
+	}
+
+	return secret["private-key"], nil
 }
 
 func (i *Integration) getOrGeneratePrivateKey() (string, error) {
@@ -136,27 +156,16 @@ func (i *Integration) getOrGeneratePrivateKey() (string, error) {
 }
 
 func (i *Integration) generateCSR(privateKeyPEM string) (string, error) {
-	// 1) Decode PEM
 	block, _ := pem.Decode([]byte(privateKeyPEM))
 	if block == nil {
 		return "", fmt.Errorf("failed to PEM decode private key")
 	}
 
-	// 2) Parse RSA key (PKCS#1 or fallback to PKCS#8)
 	privKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err != nil {
-		parsed, err2 := x509.ParsePKCS8PrivateKey(block.Bytes)
-		if err2 != nil {
-			return "", fmt.Errorf("failed to parse private key: %v / %v", err, err2)
-		}
-		var ok bool
-		privKey, ok = parsed.(*rsa.PrivateKey)
-		if !ok {
-			return "", fmt.Errorf("parsed private key is not RSA")
-		}
+		return "", fmt.Errorf("could not parse private key: %v", err)
 	}
 
-	// 3) Build the CSR template
 	template := x509.CertificateRequest{
 		Subject: pkix.Name{
 			CommonName:         i.CertificateRequest.CommonName,
@@ -170,37 +179,37 @@ func (i *Integration) generateCSR(privateKeyPEM string) (string, error) {
 		EmailAddresses: []string{i.CertificateRequest.EmailAddress},
 	}
 
-	// 4) Add IP SANs
 	for _, ipStr := range i.CertificateRequest.SansIP {
 		if ip := net.ParseIP(ipStr); ip != nil {
 			template.IPAddresses = append(template.IPAddresses, ip)
 		}
 	}
 
-	// 5) Add any OID‐based SANs as extra extensions
 	for _, oidStr := range i.CertificateRequest.SansOID {
 		parts := strings.Split(oidStr, ".")
+
 		var oid asn1.ObjectIdentifier
+
 		for _, p := range parts {
 			v, err := strconv.Atoi(p)
 			if err != nil {
 				return "", fmt.Errorf("invalid OID %q: %w", oidStr, err)
 			}
+
 			oid = append(oid, v)
 		}
+
 		template.ExtraExtensions = append(template.ExtraExtensions, pkix.Extension{
 			Id:    oid,
 			Value: nil, // if you need a specific value, marshal it here
 		})
 	}
 
-	// 6) Create the CSR (DER)
 	derCSR, err := x509.CreateCertificateRequest(rand.Reader, &template, privKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to create CSR: %w", err)
 	}
 
-	// 7) PEM‐encode the CSR
 	var pemBuf bytes.Buffer
 	if err := pem.Encode(&pemBuf, &pem.Block{Type: "CERTIFICATE REQUEST", Bytes: derCSR}); err != nil {
 		return "", fmt.Errorf("failed to PEM‐encode CSR: %w", err)

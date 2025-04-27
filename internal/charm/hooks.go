@@ -114,7 +114,7 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 
 	hookContext.Commands.JujuLog(commands.Info, "Config file pushed")
 
-	cert, err := syncCertificate(hookContext, pebble)
+	err = syncCertificate(hookContext, pebble)
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Error, "Could not sync certificate:", err.Error())
 		return
@@ -136,9 +136,20 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 
 	hookContext.Commands.JujuLog(commands.Info, "Pebble service started")
 
+	cert, err := getFileContent(pebble, CertPath)
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Certificate is not available", err.Error())
+		return
+	}
+
+	if cert == "" {
+		hookContext.Commands.JujuLog(commands.Error, "Certificate is empty")
+		return
+	}
+
 	err = createAdminAccount(hookContext, cert)
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not create admin account:", err.Error())
+		hookContext.Commands.JujuLog(commands.Error, "Could not create admin account", err.Error())
 		return
 	}
 
@@ -156,64 +167,105 @@ func tlsIntegrationCreated(hookContext *goops.HookContext) bool {
 	if len(relationIDs) == 0 {
 		return false
 	}
+
 	return true
 }
 
-func syncCertificate(hookContext *goops.HookContext, pebble *client.Client) (string, error) {
-	var cert string
+func syncSelfSignedCertificate(hookContext *goops.HookContext, pebble *client.Client) error {
+	certContent, _ := getFileContent(pebble, CertPath)
+
+	if certContent != "" {
+		hookContext.Commands.JujuLog(commands.Info, "Certificate already exists, skipping generation")
+		return nil
+	}
+
+	cert, key, err := generateCertificate()
+	if err != nil {
+		return fmt.Errorf("could not generate certificate: %w", err)
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Certificate generated")
+
+	err = pushFile(pebble, cert, "/etc/notary/config/cert.pem")
+	if err != nil {
+		return fmt.Errorf("could not push certificate: %w", err)
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Certificate pushed")
+
+	err = pushFile(pebble, key, "/etc/notary/config/key.pem")
+	if err != nil {
+		return fmt.Errorf("could not push key: %w", err)
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Key pushed")
+
+	return nil
+}
+
+func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.Client) error {
+	tlsIntegration := certificates.Integration{
+		HookContext:        hookContext,
+		RelationName:       TLSIntegrationName,
+		CertificateRequest: certificates.CertificateRequestAttributes{},
+	}
+
+	err := tlsIntegration.Request()
+	if err != nil {
+		return fmt.Errorf("could not request certificate: %w", err)
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Certificate requested")
+
+	providerCert, err := tlsIntegration.GetCertificate()
+	if err != nil {
+		return fmt.Errorf("could not get certificate: %w", err)
+	}
+
+	if providerCert.Certificate == "" {
+		return fmt.Errorf("certificate is empty")
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Certificate received")
+
+	privateKey, err := tlsIntegration.GetPrivateKey()
+	if err != nil {
+		return fmt.Errorf("could not get private key: %w", err)
+	}
+
+	err = pushFile(pebble, providerCert.Certificate, "/etc/notary/config/cert.pem")
+	if err != nil {
+		return fmt.Errorf("could not push certificate: %w", err)
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Certificate pushed")
+
+	err = pushFile(pebble, privateKey, "/etc/notary/config/key.pem")
+	if err != nil {
+		return fmt.Errorf("could not push key: %w", err)
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Key pushed")
+
+	return nil
+}
+
+func syncCertificate(hookContext *goops.HookContext, pebble *client.Client) error {
 	if !tlsIntegrationCreated(hookContext) {
 		hookContext.Commands.JujuLog(commands.Info, "TLS integration not created")
 
-		certContent, _ := getFileContent(pebble, CertPath)
-
-		if certContent != "" {
-			hookContext.Commands.JujuLog(commands.Info, "Certificate already exists, skipping generation")
-			return certContent, nil
-		}
-
-		cert, key, err := generateCertificate()
+		err := syncSelfSignedCertificate(hookContext, pebble)
 		if err != nil {
-			return "", fmt.Errorf("could not generate certificate: %w", err)
+			return fmt.Errorf("could not sync self signed certificate: %v", err)
 		}
-
-		hookContext.Commands.JujuLog(commands.Info, "Certificate generated")
-
-		err = pushFile(pebble, cert, "/etc/notary/config/cert.pem")
-		if err != nil {
-			return "", fmt.Errorf("could not push certificate: %w", err)
-		}
-
-		hookContext.Commands.JujuLog(commands.Info, "Certificate pushed")
-
-		err = pushFile(pebble, key, "/etc/notary/config/key.pem")
-		if err != nil {
-			return "", fmt.Errorf("could not push key: %w", err)
-		}
-
-		hookContext.Commands.JujuLog(commands.Info, "Key pushed")
 	} else {
-		tlsIntegration := certificates.Integration{
-			HookContext:        hookContext,
-			RelationName:       TLSIntegrationName,
-			CertificateRequest: certificates.CertificateRequestAttributes{},
-		}
-
-		err := tlsIntegration.Request()
+		err := syncTlsProviderCertificate(hookContext, pebble)
 		if err != nil {
-			return "", fmt.Errorf("could not request certificate: %w", err)
+			return fmt.Errorf("could not sync tls provider certificate: %v", err)
 		}
-
-		hookContext.Commands.JujuLog(commands.Info, "Certificate requested")
-
-		providerCert, err := tlsIntegration.GetCertificate()
-		if err != nil {
-			return "", fmt.Errorf("could not get certificate: %w", err)
-		}
-		hookContext.Commands.JujuLog(commands.Info, "Certificate received")
-		cert = providerCert.Certificate
 	}
 
-	return cert, nil
+	return nil
 }
 
 func SetStatus(hookContext *goops.HookContext) {
@@ -309,6 +361,7 @@ func getOrGenerateNotaryPassword(hookContext *goops.HookContext) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("could not add secret: %w", err)
 	}
+
 	return password, nil
 }
 
