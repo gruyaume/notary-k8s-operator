@@ -41,16 +41,25 @@ type Integration struct {
 	CertificateRequest CertificateRequestAttributes
 }
 
-func (i *Integration) Request() error {
+func (i *Integration) GetRelationID() (string, error) {
 	relationIDs, err := i.HookContext.Commands.RelationIDs(&commands.RelationIDsOptions{
 		Name: i.RelationName,
 	})
 	if err != nil {
-		return fmt.Errorf("could not get relation IDs: %w", err)
+		return "", fmt.Errorf("could not get relation IDs: %w", err)
 	}
 
 	if len(relationIDs) == 0 {
-		return fmt.Errorf("no relation IDs found for %s", i.RelationName)
+		return "", fmt.Errorf("no relation IDs found for %s", i.RelationName)
+	}
+
+	return relationIDs[0], nil
+}
+
+func (i *Integration) Request() error {
+	relationID, err := i.GetRelationID()
+	if err != nil {
+		return fmt.Errorf("could not get relation ID: %v", err)
 	}
 
 	privateKey, err := i.getOrGeneratePrivateKey()
@@ -77,7 +86,7 @@ func (i *Integration) Request() error {
 	}
 
 	relationSetOpts := &commands.RelationSetOptions{
-		ID:   relationIDs[0],
+		ID:   relationID,
 		App:  false,
 		Data: relationData,
 	}
@@ -91,14 +100,55 @@ func (i *Integration) Request() error {
 }
 
 type ProviderCertificate struct {
-	RelationID  int
-	Certificate string
-	CA          string
-	Chain       []string
+	CA                        string   `json:"ca"`
+	Chain                     []string `json:"chain"`
+	CertificateSigningRequest string   `json:"certificate_signing_request"`
+	Certificate               string   `json:"certificate"`
 }
 
-func (i *Integration) GetCertificate() (ProviderCertificate, error) {
-	return ProviderCertificate{}, nil
+func (i *Integration) GetCertificate() (*ProviderCertificate, error) {
+	relationID, err := i.GetRelationID()
+	if err != nil {
+		return nil, fmt.Errorf("could not get relation ID: %v", err)
+	}
+
+	relations, err := i.HookContext.Commands.RelationList(&commands.RelationListOptions{
+		ID: relationID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("could not list relations for ID %s: %v", relationID, err)
+	}
+
+	if len(relations) == 0 {
+		return nil, fmt.Errorf("no relations found for ID %s", relationID)
+	}
+
+	relationData, err := i.HookContext.Commands.RelationGet(&commands.RelationGetOptions{
+		ID:     relationID,
+		UnitID: relations[0],
+		App:    true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("could not get relation data: %w", err)
+	}
+
+	if relationData == nil {
+		return nil, fmt.Errorf("relation data is empty")
+	}
+
+	certificatesStr := relationData["certificates"]
+	if certificatesStr == "" {
+		return nil, fmt.Errorf("no certificates found in relation data")
+	}
+
+	var providerCertificate ProviderCertificate
+
+	err = json.Unmarshal([]byte(certificatesStr), &providerCertificate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal provider certificate: %w", err)
+	}
+
+	return &providerCertificate, nil
 }
 
 func (i *Integration) GetPrivateKey() (string, error) {
