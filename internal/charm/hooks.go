@@ -418,9 +418,3 @@ func getHostname(hookContext *goops.HookContext) string {
 
 	return unitHostname
 }
-
-func getEth0IPAddress() string {
-	// This function is a placeholder. In a real implementation, you would
-	// retrieve the IP address of the eth0 interface.
-	return "127.0.0.1"
-}
