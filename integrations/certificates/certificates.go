@@ -106,7 +106,7 @@ type ProviderCertificate struct {
 	Certificate               string   `json:"certificate"`
 }
 
-func (i *Integration) GetCertificate() (*ProviderCertificate, error) {
+func (i *Integration) GetProviderCertificate() ([]*ProviderCertificate, error) {
 	relationID, err := i.GetRelationID()
 	if err != nil {
 		return nil, fmt.Errorf("could not get relation ID: %v", err)
@@ -141,14 +141,14 @@ func (i *Integration) GetCertificate() (*ProviderCertificate, error) {
 		return nil, fmt.Errorf("no certificates found in relation data")
 	}
 
-	var providerCertificate ProviderCertificate
+	var providerCertificate []*ProviderCertificate
 
 	err = json.Unmarshal([]byte(certificatesStr), &providerCertificate)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal provider certificate: %w", err)
 	}
 
-	return &providerCertificate, nil
+	return providerCertificate, nil
 }
 
 func (i *Integration) GetPrivateKey() (string, error) {

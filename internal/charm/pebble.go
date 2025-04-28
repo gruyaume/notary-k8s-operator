@@ -104,3 +104,16 @@ func startPebbleService(pebbleClient *client.Client) error {
 
 	return nil
 }
+
+func restartPebbleService(pebbleClient *client.Client) error {
+	serviceOpts := &client.ServiceOptions{
+		Names: []string{"notary"},
+	}
+
+	_, err := pebbleClient.Restart(serviceOpts)
+	if err != nil {
+		return fmt.Errorf("could not restart pebble service: %w", err)
+	}
+
+	return nil
+}

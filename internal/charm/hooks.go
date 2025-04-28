@@ -114,7 +114,7 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 
 	hookContext.Commands.JujuLog(commands.Info, "Config file pushed")
 
-	err = syncCertificate(hookContext, pebble)
+	changed, err := syncCertificate(hookContext, pebble)
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Error, "Could not sync certificate:", err.Error())
 		return
@@ -124,6 +124,16 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Error, "Could not add pebble layer:", err.Error())
 		return
+	}
+
+	if changed {
+		err := restartPebbleService(pebble)
+		if err != nil {
+			hookContext.Commands.JujuLog(commands.Error, "Could not restart pebble service:", err.Error())
+			return
+		}
+
+		hookContext.Commands.JujuLog(commands.Info, "Pebble service restarted")
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Pebble layer added")
@@ -171,101 +181,116 @@ func tlsIntegrationCreated(hookContext *goops.HookContext) bool {
 	return true
 }
 
-func syncSelfSignedCertificate(hookContext *goops.HookContext, pebble *client.Client) error {
+func syncSelfSignedCertificate(hookContext *goops.HookContext, pebble *client.Client) (bool, error) {
 	certContent, _ := getFileContent(pebble, CertPath)
 
 	if certContent != "" {
 		hookContext.Commands.JujuLog(commands.Info, "Certificate already exists, skipping generation")
-		return nil
+		return false, nil
 	}
 
 	cert, key, err := generateCertificate()
 	if err != nil {
-		return fmt.Errorf("could not generate certificate: %w", err)
+		return false, fmt.Errorf("could not generate certificate: %w", err)
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Certificate generated")
 
 	err = pushFile(pebble, cert, "/etc/notary/config/cert.pem")
 	if err != nil {
-		return fmt.Errorf("could not push certificate: %w", err)
+		return false, fmt.Errorf("could not push certificate: %w", err)
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Certificate pushed")
 
 	err = pushFile(pebble, key, "/etc/notary/config/key.pem")
 	if err != nil {
-		return fmt.Errorf("could not push key: %w", err)
+		return false, fmt.Errorf("could not push key: %w", err)
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Key pushed")
 
-	return nil
+	return true, nil
 }
 
-func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.Client) error {
+func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.Client) (bool, error) {
 	tlsIntegration := certificates.Integration{
-		HookContext:        hookContext,
-		RelationName:       TLSIntegrationName,
-		CertificateRequest: certificates.CertificateRequestAttributes{},
+		HookContext:  hookContext,
+		RelationName: TLSIntegrationName,
+		CertificateRequest: certificates.CertificateRequestAttributes{
+			CommonName:          getHostname(hookContext),
+			SansDNS:             []string{getHostname(hookContext)},
+			SansIP:              []string{"127.0.0.1"},
+			CountryName:         "CA",
+			StateOrProvinceName: "QC",
+			LocalityName:        "Montreal",
+		},
 	}
 
 	err := tlsIntegration.Request()
 	if err != nil {
-		return fmt.Errorf("could not request certificate: %w", err)
+		return false, fmt.Errorf("could not request certificate: %w", err)
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Certificate requested")
 
-	providerCert, err := tlsIntegration.GetCertificate()
+	providerCert, err := tlsIntegration.GetProviderCertificate()
 	if err != nil {
-		return fmt.Errorf("could not get certificate: %w", err)
+		return false, fmt.Errorf("could not get certificate: %w", err)
 	}
 
-	if providerCert.Certificate == "" {
-		return fmt.Errorf("certificate is empty")
+	if len(providerCert) == 0 {
+		return false, fmt.Errorf("no certificate found")
+	}
+
+	if providerCert[0].Certificate == "" {
+		return false, fmt.Errorf("certificate is empty")
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Certificate received")
 
 	privateKey, err := tlsIntegration.GetPrivateKey()
 	if err != nil {
-		return fmt.Errorf("could not get private key: %w", err)
+		return false, fmt.Errorf("could not get private key: %w", err)
 	}
 
-	err = pushFile(pebble, providerCert.Certificate, "/etc/notary/config/cert.pem")
+	err = pushFile(pebble, providerCert[0].Certificate, "/etc/notary/config/cert.pem")
 	if err != nil {
-		return fmt.Errorf("could not push certificate: %w", err)
+		return false, fmt.Errorf("could not push certificate: %w", err)
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Certificate pushed")
 
 	err = pushFile(pebble, privateKey, "/etc/notary/config/key.pem")
 	if err != nil {
-		return fmt.Errorf("could not push key: %w", err)
+		return false, fmt.Errorf("could not push key: %w", err)
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Key pushed")
 
-	return nil
+	return true, nil
 }
 
-func syncCertificate(hookContext *goops.HookContext, pebble *client.Client) error {
+func syncCertificate(hookContext *goops.HookContext, pebble *client.Client) (bool, error) {
+	var changed bool
+
+	var err error
+
 	if !tlsIntegrationCreated(hookContext) {
 		hookContext.Commands.JujuLog(commands.Info, "TLS integration not created")
 
-		err := syncSelfSignedCertificate(hookContext, pebble)
+		changed, err = syncSelfSignedCertificate(hookContext, pebble)
 		if err != nil {
-			return fmt.Errorf("could not sync self signed certificate: %v", err)
+			return false, fmt.Errorf("could not sync self signed certificate: %v", err)
 		}
 	} else {
-		err := syncTlsProviderCertificate(hookContext, pebble)
+		changed, err = syncTlsProviderCertificate(hookContext, pebble)
 		if err != nil {
-			return fmt.Errorf("could not sync tls provider certificate: %v", err)
+			return false, fmt.Errorf("could not sync tls provider certificate: %v", err)
 		}
 	}
 
-	return nil
+	return changed, nil
 }
 
 func SetStatus(hookContext *goops.HookContext) {
@@ -392,4 +417,10 @@ func getHostname(hookContext *goops.HookContext) string {
 	unitHostname := fmt.Sprintf("%s-%s.%s-endpoints.%s.svc.cluster.local:%d", appName, unitNumber, appName, modelName, APIPort)
 
 	return unitHostname
+}
+
+func getEth0IPAddress() string {
+	// This function is a placeholder. In a real implementation, you would
+	// retrieve the IP address of the eth0 interface.
+	return "127.0.0.1"
 }
