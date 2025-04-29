@@ -14,7 +14,7 @@ type IntegrationProvider struct {
 }
 
 type RequirerCertificateSigningRequests struct {
-	CA                        string `json:"ca"`
+	CA                        bool   `json:"ca"`
 	CertificateSigningRequest string `json:"certificate_signing_request"`
 }
 
@@ -36,8 +36,7 @@ func (i *IntegrationProvider) GetRelationID() (string, error) {
 func (i *IntegrationProvider) GetCertificateRequests() ([]*RequirerCertificateSigningRequests, error) {
 	relationID, err := i.GetRelationID()
 	if err != nil {
-		i.HookContext.Commands.JujuLog(commands.Warning, "Could not get relation ID", err.Error())
-		return nil, err
+		return nil, fmt.Errorf("could not get relationID: %w", err)
 	}
 
 	relations, err := i.HookContext.Commands.RelationList(&commands.RelationListOptions{
@@ -54,7 +53,7 @@ func (i *IntegrationProvider) GetCertificateRequests() ([]*RequirerCertificateSi
 	relationData, err := i.HookContext.Commands.RelationGet(&commands.RelationGetOptions{
 		ID:     relationID,
 		UnitID: relations[0],
-		App:    true,
+		App:    false,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("could not get relation data: %w", err)

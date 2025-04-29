@@ -172,6 +172,14 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 
 	hookContext.Commands.JujuLog(commands.Info, "Admin account created")
 
+	err = loginNotaryClient(hookContext, notaryClient)
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not login to Notary client", err.Error())
+		return
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Logged in to notary")
+
 	err = syncCertificatesProvides(hookContext, notaryClient)
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Error, "Could not sync certificates provides:", err.Error())
@@ -189,7 +197,7 @@ func syncCertificatesProvides(hookContext *goops.HookContext, notaryClient *nota
 
 	tlsProviderIntegration := certificates.IntegrationProvider{
 		HookContext:  hookContext,
-		RelationName: TLSRequiresIntegrationName,
+		RelationName: TLSProvidesIntegrationName,
 	}
 
 	databagCertRequests, err := tlsProviderIntegration.GetCertificateRequests()
@@ -198,7 +206,7 @@ func syncCertificatesProvides(hookContext *goops.HookContext, notaryClient *nota
 	}
 
 	for _, databagCertRequest := range databagCertRequests {
-		hookContext.Commands.JujuLog(commands.Info, "Certificate request:", databagCertRequest.CertificateSigningRequest)
+		hookContext.Commands.JujuLog(commands.Info, "Databag certificate request:", databagCertRequest.CertificateSigningRequest)
 	}
 
 	notaryCertRequests, err := notaryClient.ListCertificateRequests()
@@ -232,6 +240,35 @@ func getNotaryClient(certPEM string) (*notary.Client, error) {
 	}
 
 	return client, nil
+}
+
+func loginNotaryClient(hookContext *goops.HookContext, client *notary.Client) error {
+	secret, err := hookContext.Commands.SecretGet(&commands.SecretGetOptions{
+		Refresh: true,
+		Label:   NotaryLoginSecretLabel,
+	})
+	if err != nil {
+		return fmt.Errorf("could not get secret: %w", err)
+	}
+
+	if secret == nil {
+		return fmt.Errorf("secret is empty")
+	}
+
+	password := secret["password"]
+	if password == "" {
+		return fmt.Errorf("password is empty")
+	}
+
+	err = client.Login(&notary.LoginOptions{
+		Username: CharmAccountUsername,
+		Password: password,
+	})
+	if err != nil {
+		return fmt.Errorf("could not login to notary: %w", err)
+	}
+
+	return nil
 }
 
 func integrationCreated(hookContext *goops.HookContext, name string) bool {
