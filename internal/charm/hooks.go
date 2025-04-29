@@ -17,14 +17,15 @@ import (
 )
 
 const (
-	KeyPath                = "/etc/notary/config/key.pem"
-	CertPath               = "/etc/notary/config/cert.pem"
-	ConfigPath             = "/etc/notary/config/notary.yaml"
-	APIPort                = 2111
-	CharmAccountUsername   = "charm@notary.com"
-	NotaryLoginSecretLabel = "NOTARY_LOGIN"
-	MetricsIntegrationName = "metrics"
-	TLSIntegrationName     = "certificates"
+	KeyPath                    = "/etc/notary/config/key.pem"
+	CertPath                   = "/etc/notary/config/cert.pem"
+	ConfigPath                 = "/etc/notary/config/notary.yaml"
+	APIPort                    = 2111
+	CharmAccountUsername       = "charm@notary.com"
+	NotaryLoginSecretLabel     = "NOTARY_LOGIN"
+	MetricsIntegrationName     = "metrics"
+	TLSRequiresIntegrationName = "access-certificates"
+	TLSProvidesIntegrationName = "certificates"
 )
 
 func setPorts(hookContext *goops.HookContext) error {
@@ -164,11 +165,42 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Admin account created")
+
+	err = syncCertificatesProvides(hookContext)
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not sync certificates provides:", err.Error())
+		return
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Certificates provider synced")
 }
 
-func tlsIntegrationCreated(hookContext *goops.HookContext) bool {
+// syncCertificatesProvides provides TLS certificates to TLS requirers
+func syncCertificatesProvides(hookContext *goops.HookContext) error {
+	if !integrationCreated(hookContext, TLSProvidesIntegrationName) {
+		return nil
+	}
+
+	tlsProviderIntegration := certificates.IntegrationProvider{
+		HookContext:  hookContext,
+		RelationName: TLSRequiresIntegrationName,
+	}
+
+	certRequests, err := tlsProviderIntegration.GetCertificateRequests()
+	if err != nil {
+		return fmt.Errorf("could not get certificate requests: %w", err)
+	}
+
+	for _, certRequest := range certRequests {
+		hookContext.Commands.JujuLog(commands.Info, "Certificate request:", certRequest.CertificateSigningRequest)
+	}
+
+	return nil
+}
+
+func integrationCreated(hookContext *goops.HookContext, name string) bool {
 	relationIDs, err := hookContext.Commands.RelationIDs(&commands.RelationIDsOptions{
-		Name: TLSIntegrationName,
+		Name: name,
 	})
 	if err != nil {
 		return false
@@ -213,11 +245,13 @@ func syncSelfSignedCertificate(hookContext *goops.HookContext, pebble *client.Cl
 	return true, nil
 }
 
+// syncTlsProviderCertificate makes a certificate request to the TLS provider
+// and pushes the certificate and key to the pebble client.
 func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.Client) (bool, error) {
 	changed := false
-	tlsIntegration := certificates.Integration{
+	tlsRequirerIntegration := certificates.IntegrationRequirer{
 		HookContext:  hookContext,
-		RelationName: TLSIntegrationName,
+		RelationName: TLSRequiresIntegrationName,
 		CertificateRequest: certificates.CertificateRequestAttributes{
 			CommonName:          getHostname(hookContext),
 			SansDNS:             []string{getHostname(hookContext)},
@@ -228,14 +262,14 @@ func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.C
 		},
 	}
 
-	err := tlsIntegration.Request()
+	err := tlsRequirerIntegration.Request()
 	if err != nil {
 		return changed, fmt.Errorf("could not request certificate: %w", err)
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Certificate requested")
 
-	providerCert, err := tlsIntegration.GetProviderCertificate()
+	providerCert, err := tlsRequirerIntegration.GetProviderCertificate()
 	if err != nil {
 		return changed, fmt.Errorf("could not get certificate: %w", err)
 	}
@@ -250,7 +284,7 @@ func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.C
 
 	hookContext.Commands.JujuLog(commands.Info, "Certificate received")
 
-	privateKey, err := tlsIntegration.GetPrivateKey()
+	privateKey, err := tlsRequirerIntegration.GetPrivateKey()
 	if err != nil {
 		return changed, fmt.Errorf("could not get private key: %w", err)
 	}
@@ -292,7 +326,7 @@ func syncCertificate(hookContext *goops.HookContext, pebble *client.Client) (boo
 
 	var err error
 
-	if !tlsIntegrationCreated(hookContext) {
+	if !integrationCreated(hookContext, TLSRequiresIntegrationName) {
 		hookContext.Commands.JujuLog(commands.Info, "TLS integration not created")
 
 		changed, err = syncSelfSignedCertificate(hookContext, pebble)

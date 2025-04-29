@@ -35,13 +35,20 @@ type CertificateRequestAttributes struct {
 	LocalityName        string
 }
 
-type Integration struct {
+type IntegrationRequirer struct {
 	HookContext        *goops.HookContext
 	RelationName       string
 	CertificateRequest CertificateRequestAttributes
 }
 
-func (i *Integration) GetRelationID() (string, error) {
+type ProviderCertificate struct {
+	CA                        string   `json:"ca"`
+	Chain                     []string `json:"chain"`
+	CertificateSigningRequest string   `json:"certificate_signing_request"`
+	Certificate               string   `json:"certificate"`
+}
+
+func (i *IntegrationRequirer) GetRelationID() (string, error) {
 	relationIDs, err := i.HookContext.Commands.RelationIDs(&commands.RelationIDsOptions{
 		Name: i.RelationName,
 	})
@@ -56,7 +63,7 @@ func (i *Integration) GetRelationID() (string, error) {
 	return relationIDs[0], nil
 }
 
-func (i *Integration) Request() error {
+func (i *IntegrationRequirer) Request() error {
 	relationID, err := i.GetRelationID()
 	if err != nil {
 		return fmt.Errorf("could not get relation ID: %v", err)
@@ -105,7 +112,7 @@ func (i *Integration) Request() error {
 	return nil
 }
 
-func (i *Integration) certificateRequested() bool {
+func (i *IntegrationRequirer) certificateRequested() bool {
 	relationID, err := i.GetRelationID()
 	if err != nil {
 		i.HookContext.Commands.JujuLog(commands.Warning, "Could not get relation ID", err.Error())
@@ -182,14 +189,7 @@ func (i *Integration) certificateRequested() bool {
 	return err == nil
 }
 
-type ProviderCertificate struct {
-	CA                        string   `json:"ca"`
-	Chain                     []string `json:"chain"`
-	CertificateSigningRequest string   `json:"certificate_signing_request"`
-	Certificate               string   `json:"certificate"`
-}
-
-func (i *Integration) GetProviderCertificate() ([]*ProviderCertificate, error) {
+func (i *IntegrationRequirer) GetProviderCertificate() ([]*ProviderCertificate, error) {
 	relationID, err := i.GetRelationID()
 	if err != nil {
 		return nil, fmt.Errorf("could not get relation ID: %v", err)
@@ -234,7 +234,7 @@ func (i *Integration) GetProviderCertificate() ([]*ProviderCertificate, error) {
 	return providerCertificate, nil
 }
 
-func (i *Integration) GetPrivateKey() (string, error) {
+func (i *IntegrationRequirer) GetPrivateKey() (string, error) {
 	secret, err := i.HookContext.Commands.SecretGet(&commands.SecretGetOptions{
 		Label:   PrivateKeySecretLabel,
 		Refresh: true,
@@ -250,7 +250,7 @@ func (i *Integration) GetPrivateKey() (string, error) {
 	return secret["private-key"], nil
 }
 
-func (i *Integration) getOrGeneratePrivateKey() (string, error) {
+func (i *IntegrationRequirer) getOrGeneratePrivateKey() (string, error) {
 	secret, _ := i.HookContext.Commands.SecretGet(&commands.SecretGetOptions{
 		Label:   PrivateKeySecretLabel,
 		Refresh: true,
@@ -292,7 +292,7 @@ func (i *Integration) getOrGeneratePrivateKey() (string, error) {
 	return keyBuf.String(), nil
 }
 
-func (i *Integration) generateCSR(privateKeyPEM string) (string, error) {
+func (i *IntegrationRequirer) generateCSR(privateKeyPEM string) (string, error) {
 	block, _ := pem.Decode([]byte(privateKeyPEM))
 	if block == nil {
 		return "", fmt.Errorf("failed to PEM decode private key")
