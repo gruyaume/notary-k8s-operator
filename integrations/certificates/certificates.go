@@ -62,6 +62,11 @@ func (i *Integration) Request() error {
 		return fmt.Errorf("could not get relation ID: %v", err)
 	}
 
+	if i.certificateRequested() {
+		i.HookContext.Commands.JujuLog(commands.Info, "Certificate already requested")
+		return nil
+	}
+
 	privateKey, err := i.getOrGeneratePrivateKey()
 	if err != nil {
 		return fmt.Errorf("could not get or generate private key: %w", err)
@@ -74,6 +79,7 @@ func (i *Integration) Request() error {
 
 	csrMap := map[string]string{
 		"certificate_signing_request": csr,
+		"ca":                          "false",
 	}
 
 	csrsBytes, err := json.Marshal([]map[string]string{csrMap})
@@ -97,6 +103,83 @@ func (i *Integration) Request() error {
 	}
 
 	return nil
+}
+
+func (i *Integration) certificateRequested() bool {
+	relationID, err := i.GetRelationID()
+	if err != nil {
+		i.HookContext.Commands.JujuLog(commands.Warning, "Could not get relation ID", err.Error())
+		return false
+	}
+
+	unitName := i.HookContext.Environment.JujuUnitName()
+
+	relationData, err := i.HookContext.Commands.RelationGet(&commands.RelationGetOptions{
+		ID:     relationID,
+		UnitID: unitName,
+		App:    false,
+	})
+	if err != nil {
+		return false
+	}
+
+	if relationData == nil {
+		return false
+	}
+
+	certificateSigningRequestsStr := relationData["certificate_signing_requests"]
+	if certificateSigningRequestsStr == "" {
+		return false
+	}
+
+	var certificateSigningRequests []map[string]string
+
+	err = json.Unmarshal([]byte(certificateSigningRequestsStr), &certificateSigningRequests)
+	if err != nil {
+		return false
+	}
+
+	if len(certificateSigningRequests) == 0 {
+		return false
+	}
+
+	certificateSigningRequest := certificateSigningRequests[0]
+
+	if certificateSigningRequest["certificate_signing_request"] == "" {
+		return false
+	}
+
+	block, _ := pem.Decode([]byte(certificateSigningRequest["certificate_signing_request"]))
+	if block == nil {
+		return false
+	}
+
+	csr, err := x509.ParseCertificateRequest(block.Bytes)
+	if err != nil {
+		return false
+	}
+
+	if csr.Subject.CommonName != i.CertificateRequest.CommonName {
+		return false
+	}
+
+	if len(csr.DNSNames) != len(i.CertificateRequest.SansDNS) {
+		return false
+	}
+
+	privateKey, err := i.GetPrivateKey()
+	if err != nil {
+		return false
+	}
+
+	block, _ = pem.Decode([]byte(privateKey))
+	if block == nil {
+		return false
+	}
+
+	err = csr.CheckSignature()
+
+	return err == nil
 }
 
 type ProviderCertificate struct {
@@ -177,10 +260,14 @@ func (i *Integration) getOrGeneratePrivateKey() (string, error) {
 		return secret["private-key"], nil
 	}
 
+	i.HookContext.Commands.JujuLog(commands.Warning, "Secret is empty")
+
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate private key: %w", err)
 	}
+
+	i.HookContext.Commands.JujuLog(commands.Warning, "Generated new private key")
 
 	keyBuf := &bytes.Buffer{}
 	privBytes := x509.MarshalPKCS1PrivateKey(priv)
