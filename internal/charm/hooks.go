@@ -158,7 +158,13 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 		return
 	}
 
-	err = createAdminAccount(hookContext, cert)
+	notaryClient, err := getNotaryClient(cert)
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not create notary client:", err.Error())
+		return
+	}
+
+	err = createAdminAccount(hookContext, notaryClient)
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Error, "Could not create admin account", err.Error())
 		return
@@ -166,7 +172,7 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 
 	hookContext.Commands.JujuLog(commands.Info, "Admin account created")
 
-	err = syncCertificatesProvides(hookContext)
+	err = syncCertificatesProvides(hookContext, notaryClient)
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Error, "Could not sync certificates provides:", err.Error())
 		return
@@ -176,7 +182,7 @@ func HandleDefaultHook(hookContext *goops.HookContext) {
 }
 
 // syncCertificatesProvides provides TLS certificates to TLS requirers
-func syncCertificatesProvides(hookContext *goops.HookContext) error {
+func syncCertificatesProvides(hookContext *goops.HookContext, notaryClient *notary.Client) error {
 	if !integrationCreated(hookContext, TLSProvidesIntegrationName) {
 		return nil
 	}
@@ -186,16 +192,46 @@ func syncCertificatesProvides(hookContext *goops.HookContext) error {
 		RelationName: TLSRequiresIntegrationName,
 	}
 
-	certRequests, err := tlsProviderIntegration.GetCertificateRequests()
+	databagCertRequests, err := tlsProviderIntegration.GetCertificateRequests()
 	if err != nil {
 		return fmt.Errorf("could not get certificate requests: %w", err)
 	}
 
-	for _, certRequest := range certRequests {
-		hookContext.Commands.JujuLog(commands.Info, "Certificate request:", certRequest.CertificateSigningRequest)
+	for _, databagCertRequest := range databagCertRequests {
+		hookContext.Commands.JujuLog(commands.Info, "Certificate request:", databagCertRequest.CertificateSigningRequest)
+	}
+
+	notaryCertRequests, err := notaryClient.ListCertificateRequests()
+	if err != nil {
+		return fmt.Errorf("could not list certificate requests: %w", err)
+	}
+
+	for _, notaryCertRequest := range notaryCertRequests {
+		hookContext.Commands.JujuLog(commands.Info, "Notary certificate request:", notaryCertRequest.CSR)
 	}
 
 	return nil
+}
+
+func getNotaryClient(certPEM string) (*notary.Client, error) {
+	roots := x509.NewCertPool()
+	if ok := roots.AppendCertsFromPEM([]byte(certPEM)); !ok {
+		return nil, fmt.Errorf("failed to parse root certificate PEM")
+	}
+
+	clientConfig := &notary.Config{
+		BaseURL: "https://127.0.0.1:" + fmt.Sprint(APIPort),
+		TLSConfig: &tls.Config{
+			RootCAs: roots,
+		},
+	}
+
+	client, err := notary.New(clientConfig)
+	if err != nil {
+		return nil, fmt.Errorf("could not create notary client: %w", err)
+	}
+
+	return client, nil
 }
 
 func integrationCreated(hookContext *goops.HookContext, name string) bool {
@@ -362,25 +398,8 @@ func SetStatus(hookContext *goops.HookContext) {
 	hookContext.Commands.JujuLog(commands.Info, "Status set to active")
 }
 
-func createAdminAccount(hookContext *goops.HookContext, certPEM string) error {
-	roots := x509.NewCertPool()
-	if ok := roots.AppendCertsFromPEM([]byte(certPEM)); !ok {
-		return fmt.Errorf("failed to parse root certificate PEM")
-	}
-
-	clientConfig := &notary.Config{
-		BaseURL: "https://127.0.0.1:" + fmt.Sprint(APIPort),
-		TLSConfig: &tls.Config{
-			RootCAs: roots,
-		},
-	}
-
-	client, err := notary.New(clientConfig)
-	if err != nil {
-		return fmt.Errorf("could not create notary client: %w", err)
-	}
-
-	status, err := client.GetStatus()
+func createAdminAccount(hookContext *goops.HookContext, notaryClient *notary.Client) error {
+	status, err := notaryClient.GetStatus()
 	if err != nil {
 		return fmt.Errorf("could not get status: %w", err)
 	}
@@ -398,7 +417,7 @@ func createAdminAccount(hookContext *goops.HookContext, certPEM string) error {
 		return fmt.Errorf("could not get password from secret")
 	}
 
-	err = client.CreateAccount(&notary.CreateAccountOptions{
+	err = notaryClient.CreateAccount(&notary.CreateAccountOptions{
 		Username: CharmAccountUsername,
 		Password: password,
 	})
