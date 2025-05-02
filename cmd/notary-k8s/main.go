@@ -52,22 +52,13 @@ func initTracing(hc *goops.HookContext) (context.Context, *sdktrace.TracerProvid
 		HookContext:  hc,
 		RelationName: relationName,
 		CharmName:    serviceName,
+		ServiceName:  serviceName,
 	}
 	ti.PublishSupportedProtocols([]tracingIntegration.Protocol{tracingIntegration.GRPC})
 
-	endpoint := ti.GetEndpoint()
-
 	ctx := context.Background()
 
-	if endpoint == "" {
-		return ctx, nil
-	}
-
-	tp, err := tracingIntegration.InitTracer(ctx, tracingIntegration.TelemetryConfig{
-		OTLPEndpoint:   endpoint,
-		ServiceName:    serviceName,
-		ServiceVersion: serviceVersion,
-	})
+	tp, err := ti.InitTracer(ctx)
 	if err != nil {
 		hc.Commands.JujuLog(commands.Error, "could not initialize tracer:", err.Error())
 		return ctx, nil

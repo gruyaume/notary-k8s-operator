@@ -20,6 +20,7 @@ type Integration struct {
 	HookContext  *goops.HookContext
 	RelationName string
 	CharmName    string
+	ServiceName  string
 }
 
 type Protocol string
@@ -87,77 +88,19 @@ func (i *Integration) PublishSupportedProtocols(protocols []Protocol) {
 	}
 }
 
-func (i *Integration) GetEndpoint() string {
-	relationID, err := i.GetRelationID()
-	if err != nil {
-		i.HookContext.Commands.JujuLog(commands.Error, "Could not get relation ID:", err.Error())
-		return ""
+func (i *Integration) InitTracer(ctx context.Context) (*sdktrace.TracerProvider, error) {
+	endpoint := i.GetEndpoint()
+
+	if endpoint == "" {
+		return nil, fmt.Errorf("no gRPC receiver found")
 	}
 
-	relations, err := i.HookContext.Commands.RelationList(&commands.RelationListOptions{
-		ID: relationID,
-	})
-	if err != nil {
-		i.HookContext.Commands.JujuLog(commands.Error, "Could not get relation list:", err.Error())
-		return ""
-	}
+	jujuModel := i.HookContext.Environment.JujuModelName()
+	jujuModelUUID := i.HookContext.Environment.JujuModelUUID()
+	jujuUnit := i.HookContext.Environment.JujuUnitName()
 
-	if len(relations) == 0 {
-		i.HookContext.Commands.JujuLog(commands.Error, "No relations found for ID:", relationID)
-		return ""
-	}
-
-	relationData, err := i.HookContext.Commands.RelationGet(&commands.RelationGetOptions{
-		ID:     relationID,
-		UnitID: relations[0],
-		App:    true,
-	})
-	if err != nil {
-		i.HookContext.Commands.JujuLog(commands.Error, "Could not get relation data:", err.Error())
-		return ""
-	}
-
-	receiversStr := relationData["receivers"]
-	if receiversStr == "" {
-		i.HookContext.Commands.JujuLog(commands.Error, "No receivers found in relation data")
-		return ""
-	}
-
-	var providerReceivers []*ProviderReceivers
-
-	err = json.Unmarshal([]byte(receiversStr), &providerReceivers)
-	if err != nil {
-		i.HookContext.Commands.JujuLog(commands.Error, "Could not unmarshal receivers:", err.Error())
-		return ""
-	}
-
-	if len(providerReceivers) == 0 {
-		i.HookContext.Commands.JujuLog(commands.Error, "No provider receivers found")
-		return ""
-	}
-
-	for _, receiver := range providerReceivers {
-		if receiver.Protocol.Name == string(GRPC) {
-			return receiver.Url
-		}
-	}
-
-	i.HookContext.Commands.JujuLog(commands.Error, "No gRPC receiver found")
-
-	return ""
-}
-
-type TelemetryConfig struct {
-	Enabled        bool
-	OTLPEndpoint   string
-	ServiceName    string
-	ServiceVersion string
-}
-
-// InitTracer sets up a global TracerProvider based on the given configuration.
-func InitTracer(ctx context.Context, cfg TelemetryConfig) (*sdktrace.TracerProvider, error) {
 	exp, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithEndpoint(cfg.OTLPEndpoint),
+		otlptracegrpc.WithEndpoint(endpoint),
 		otlptracegrpc.WithInsecure(),
 	)
 	if err != nil {
@@ -168,8 +111,10 @@ func InitTracer(ctx context.Context, cfg TelemetryConfig) (*sdktrace.TracerProvi
 
 	res, err := sdkresource.New(ctx,
 		sdkresource.WithAttributes(
-			semconv.ServiceNameKey.String(cfg.ServiceName),
-			attribute.String("service.version", cfg.ServiceVersion),
+			semconv.ServiceNameKey.String(i.ServiceName),
+			attribute.String("juju_unit", jujuUnit),
+			attribute.String("juju_model", jujuModel),
+			attribute.String("juju_model_uuid", jujuModelUUID),
 		),
 	)
 	if err != nil {
@@ -186,4 +131,64 @@ func InitTracer(ctx context.Context, cfg TelemetryConfig) (*sdktrace.TracerProvi
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
 	return tp, nil
+}
+
+func (i *Integration) GetEndpoint() string {
+	relationID, err := i.GetRelationID()
+	if err != nil {
+		i.HookContext.Commands.JujuLog(commands.Debug, "Could not get relation ID:", err.Error())
+		return ""
+	}
+
+	relations, err := i.HookContext.Commands.RelationList(&commands.RelationListOptions{
+		ID: relationID,
+	})
+	if err != nil {
+		i.HookContext.Commands.JujuLog(commands.Debug, "Could not get relation list:", err.Error())
+		return ""
+	}
+
+	if len(relations) == 0 {
+		i.HookContext.Commands.JujuLog(commands.Debug, "No relations found for ID:", relationID)
+		return ""
+	}
+
+	relationData, err := i.HookContext.Commands.RelationGet(&commands.RelationGetOptions{
+		ID:     relationID,
+		UnitID: relations[0],
+		App:    true,
+	})
+	if err != nil {
+		i.HookContext.Commands.JujuLog(commands.Debug, "Could not get relation data:", err.Error())
+		return ""
+	}
+
+	receiversStr := relationData["receivers"]
+	if receiversStr == "" {
+		i.HookContext.Commands.JujuLog(commands.Debug, "No receivers found in relation data")
+		return ""
+	}
+
+	var providerReceivers []*ProviderReceivers
+
+	err = json.Unmarshal([]byte(receiversStr), &providerReceivers)
+	if err != nil {
+		i.HookContext.Commands.JujuLog(commands.Debug, "Could not unmarshal receivers:", err.Error())
+		return ""
+	}
+
+	if len(providerReceivers) == 0 {
+		i.HookContext.Commands.JujuLog(commands.Debug, "No provider receivers found")
+		return ""
+	}
+
+	for _, receiver := range providerReceivers {
+		if receiver.Protocol.Name == string(GRPC) {
+			return receiver.Url
+		}
+	}
+
+	i.HookContext.Commands.JujuLog(commands.Debug, "No gRPC receiver found")
+
+	return ""
 }
