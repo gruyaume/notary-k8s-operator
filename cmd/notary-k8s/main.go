@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
 
 	"github.com/gruyaume/goops"
 	"github.com/gruyaume/goops/commands"
@@ -10,6 +9,12 @@ import (
 	"github.com/gruyaume/notary-k8s/internal/charm"
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+)
+
+const (
+	serviceName    = "notary-k8s"
+	serviceVersion = "0.0.1" // pin to your build version
+	relationName   = "tracing"
 )
 
 func main() {
@@ -20,50 +25,72 @@ func main() {
 		return
 	}
 
-	ti := tracingIntegration.Integration{
-		HookContext:  hc,
-		RelationName: "tracing",
-		CharmName:    "notary-k8s",
-	}
+	run(hc, hook)
+}
 
-	ti.PublishSupportedProtocols([]tracingIntegration.Protocol{tracingIntegration.GRPC})
-	endpoint := ti.GetEndpoint()
+// run initializes tracing, starts the root span, dispatches hooks, and ensures shutdown.
+func run(hc *goops.HookContext, hook string) {
+	ctx, tp := initTracing(hc)
+	// ensure tracer is shut down
+	defer shutdown(tp, ctx)
 
-	ctx := context.Background()
-
-	var tp *sdktrace.TracerProvider
-
-	var err error
-
-	if endpoint != "" {
-		tp, err = tracingIntegration.InitTracer(ctx, tracingIntegration.TelemetryConfig{
-			OTLPEndpoint:   endpoint,
-			ServiceName:    "notary-k8s",
-			ServiceVersion: "0.0.1", // pin to your build version
-		})
-		if err != nil {
-			hc.Commands.JujuLog(commands.Error, "could not initialize tracer:", err.Error())
-		} else {
-			defer func() {
-				err := tp.Shutdown(ctx)
-				if err != nil {
-					hc.Commands.JujuLog(commands.Error, "could not shutdown tracer:", err.Error())
-				}
-			}()
-		}
-	}
-
-	tracer := otel.Tracer("notary-k8s")
+	tracer := otel.Tracer(serviceName)
 	ctx, span := tracer.Start(ctx, hook)
 
 	defer span.End()
 
+	// execute charm hooks under span
 	charm.HandleDefaultHook(ctx, hc)
 	charm.SetStatus(ctx, hc)
 
+	flush(tp, ctx)
+}
+
+// initTracing sets up the tracing integration and returns ctx and TracerProvider (or nil).
+func initTracing(hc *goops.HookContext) (context.Context, *sdktrace.TracerProvider) {
+	ti := tracingIntegration.Integration{
+		HookContext:  hc,
+		RelationName: relationName,
+		CharmName:    serviceName,
+	}
+	ti.PublishSupportedProtocols([]tracingIntegration.Protocol{tracingIntegration.GRPC})
+
+	endpoint := ti.GetEndpoint()
+
+	ctx := context.Background()
+
+	if endpoint == "" {
+		return ctx, nil
+	}
+
+	tp, err := tracingIntegration.InitTracer(ctx, tracingIntegration.TelemetryConfig{
+		OTLPEndpoint:   endpoint,
+		ServiceName:    serviceName,
+		ServiceVersion: serviceVersion,
+	})
+	if err != nil {
+		hc.Commands.JujuLog(commands.Error, "could not initialize tracer:", err.Error())
+		return ctx, nil
+	}
+
+	return ctx, tp
+}
+
+// flush ensures all spans are exported before shutdown.
+func flush(tp *sdktrace.TracerProvider, ctx context.Context) {
 	if tp != nil {
 		tp.ForceFlush(ctx)
 	}
+}
 
-	os.Exit(0)
+// shutdown cleanly stops the tracer provider.
+func shutdown(tp *sdktrace.TracerProvider, ctx context.Context) {
+	if tp == nil {
+		return
+	}
+
+	if err := tp.Shutdown(ctx); err != nil {
+		hc := goops.NewHookContext()
+		hc.Commands.JujuLog(commands.Error, "could not shutdown tracer:", err.Error())
+	}
 }

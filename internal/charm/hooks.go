@@ -31,6 +31,9 @@ const (
 
 // HandleDefaultHook handles charm events. It is the main entry point for the charm.
 func HandleDefaultHook(ctx context.Context, hookContext *goops.HookContext) {
+	ctx, span := otel.Tracer("notary-k8s").Start(ctx, "HandleDefaultHook")
+	defer span.End()
+
 	err := ensureLeader(ctx, hookContext)
 	if err != nil {
 		return
@@ -358,6 +361,9 @@ func syncCertificate(ctx context.Context, hookContext *goops.HookContext, pebble
 }
 
 func SetStatus(ctx context.Context, hookContext *goops.HookContext) {
+	_, span := otel.Tracer("notary-k8s").Start(ctx, "SetStatus")
+	defer span.End()
+
 	status := commands.StatusActive
 
 	message := ""

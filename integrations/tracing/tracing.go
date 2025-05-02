@@ -57,7 +57,7 @@ func (i *Integration) GetRelationID() (string, error) {
 func (i *Integration) PublishSupportedProtocols(protocols []Protocol) {
 	relationID, err := i.GetRelationID()
 	if err != nil {
-		i.HookContext.Commands.JujuLog(commands.Error, "Could not get relation ID:", err.Error())
+		i.HookContext.Commands.JujuLog(commands.Debug, "Could not get relation ID:", err.Error())
 		return
 	}
 
