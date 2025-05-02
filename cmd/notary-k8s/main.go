@@ -12,9 +12,8 @@ import (
 )
 
 const (
-	serviceName    = "notary-k8s"
-	serviceVersion = "0.0.1" // pin to your build version
-	relationName   = "tracing"
+	serviceName            = "notary-k8s"
+	TracingIntegrationName = "tracing"
 )
 
 func main() {
@@ -50,7 +49,7 @@ func run(hc *goops.HookContext, hook string) {
 func initTracing(hc *goops.HookContext) (context.Context, *trace.TracerProvider) {
 	ti := tracing.Integration{
 		HookContext:  hc,
-		RelationName: relationName,
+		RelationName: TracingIntegrationName,
 		ServiceName:  serviceName,
 	}
 	ti.PublishSupportedProtocols([]tracing.Protocol{tracing.GRPC})
