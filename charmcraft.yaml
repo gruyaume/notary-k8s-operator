@@ -51,3 +51,6 @@ provides:
 requires:
   certificates:
     interface: tls-certificates
+  tracing:
+    interface: tracing
+    limit: 1

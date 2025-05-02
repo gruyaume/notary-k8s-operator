@@ -91,13 +91,11 @@ func (i *Integration) Request() error {
 		"certificate_signing_requests": string(csrsBytes),
 	}
 
-	relationSetOpts := &commands.RelationSetOptions{
+	err = i.HookContext.Commands.RelationSet(&commands.RelationSetOptions{
 		ID:   relationID,
 		App:  false,
 		Data: relationData,
-	}
-
-	err = i.HookContext.Commands.RelationSet(relationSetOpts)
+	})
 	if err != nil {
 		return fmt.Errorf("could not set relation data: %w", err)
 	}
