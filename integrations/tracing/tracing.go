@@ -19,7 +19,6 @@ import (
 type Integration struct {
 	HookContext  *goops.HookContext
 	RelationName string
-	CharmName    string
 	ServiceName  string
 }
 

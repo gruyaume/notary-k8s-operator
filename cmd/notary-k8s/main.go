@@ -5,10 +5,10 @@ import (
 
 	"github.com/gruyaume/goops"
 	"github.com/gruyaume/goops/commands"
-	tracingIntegration "github.com/gruyaume/notary-k8s/integrations/tracing"
+	"github.com/gruyaume/notary-k8s/integrations/tracing"
 	"github.com/gruyaume/notary-k8s/internal/charm"
 	"go.opentelemetry.io/otel"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace"
 )
 
 const (
@@ -47,14 +47,13 @@ func run(hc *goops.HookContext, hook string) {
 }
 
 // initTracing sets up the tracing integration and returns ctx and TracerProvider (or nil).
-func initTracing(hc *goops.HookContext) (context.Context, *sdktrace.TracerProvider) {
-	ti := tracingIntegration.Integration{
+func initTracing(hc *goops.HookContext) (context.Context, *trace.TracerProvider) {
+	ti := tracing.Integration{
 		HookContext:  hc,
 		RelationName: relationName,
-		CharmName:    serviceName,
 		ServiceName:  serviceName,
 	}
-	ti.PublishSupportedProtocols([]tracingIntegration.Protocol{tracingIntegration.GRPC})
+	ti.PublishSupportedProtocols([]tracing.Protocol{tracing.GRPC})
 
 	ctx := context.Background()
 
@@ -68,14 +67,14 @@ func initTracing(hc *goops.HookContext) (context.Context, *sdktrace.TracerProvid
 }
 
 // flush ensures all spans are exported before shutdown.
-func flush(tp *sdktrace.TracerProvider, ctx context.Context) {
+func flush(tp *trace.TracerProvider, ctx context.Context) {
 	if tp != nil {
 		tp.ForceFlush(ctx)
 	}
 }
 
 // shutdown cleanly stops the tracer provider.
-func shutdown(tp *sdktrace.TracerProvider, ctx context.Context) {
+func shutdown(tp *trace.TracerProvider, ctx context.Context) {
 	if tp == nil {
 		return
 	}
