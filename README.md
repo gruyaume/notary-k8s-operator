@@ -9,8 +9,6 @@ The charm supports many typical charm integrations, including:
 
 The tracing integration here is especially interesting since we could use it to gather insight into performance improvements from using `goops`:
 
-![alt text](image.png)
-
 <p align="center">
   <img src="docs/traces.png" width="350" title="Charm traces">
 </p>
