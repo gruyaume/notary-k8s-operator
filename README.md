@@ -2,6 +2,11 @@
 
 This charm is a Proof of Concept for validating the [goops](https://github.com/gruyaume/goops) library. The official charm can be found [here](https://github.com/canonical/notary-k8s-operator).
 
+The charm supports many typical charm integrations, including:
+- `metrics` for Prometheus scraping
+- `tracing` for OpenTelemetry
+- `certificates` for TLS certificate management
+
 ## Getting Started
 
 ```shell
