@@ -3,7 +3,7 @@ module github.com/gruyaume/notary-k8s
 go 1.24.0
 
 require (
-	github.com/canonical/pebble v1.20.0
+	github.com/canonical/pebble v1.21.0
 	github.com/gruyaume/goops v0.0.11
 	go.opentelemetry.io/otel v1.35.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.35.0
