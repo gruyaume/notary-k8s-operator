@@ -12,9 +12,9 @@ import (
 	"github.com/gruyaume/goops"
 	"github.com/gruyaume/goops/commands"
 	"github.com/gruyaume/goops/metadata"
-	"github.com/gruyaume/notary-k8s/integrations/certificates"
-	"github.com/gruyaume/notary-k8s/integrations/prometheus"
-	"github.com/gruyaume/notary-k8s/internal/notary"
+	"github.com/gruyaume/notary-k8s-operator/integrations/certificates"
+	"github.com/gruyaume/notary-k8s-operator/integrations/prometheus"
+	"github.com/gruyaume/notary-k8s-operator/internal/notary"
 	"go.opentelemetry.io/otel"
 )
 

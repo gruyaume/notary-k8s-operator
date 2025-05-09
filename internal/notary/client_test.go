@@ -3,7 +3,7 @@ package notary_test
 import (
 	"context"
 
-	"github.com/gruyaume/notary-k8s/internal/notary"
+	"github.com/gruyaume/notary-k8s-operator/internal/notary"
 )
 
 type fakeRequester struct {

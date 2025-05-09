@@ -1,4 +1,4 @@
-module github.com/gruyaume/notary-k8s
+module github.com/gruyaume/notary-k8s-operator
 
 go 1.24.0
 

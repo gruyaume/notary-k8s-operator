@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/gruyaume/notary-k8s/internal/notary"
+	"github.com/gruyaume/notary-k8s-operator/internal/notary"
 )
 
 func TestCreateAccount_Success(t *testing.T) {
