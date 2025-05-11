@@ -19,6 +19,12 @@ github.com/gorilla/websocket v1.5.1 h1:gmztn0JnHVt9JZquRuzLw3g4wouNVzKL15iLr/zn/
 github.com/gorilla/websocket v1.5.1/go.mod h1:x3kM2JMyaluk02fnUJpQuwD2dCS5NDG2ZHL0uE0tcaY=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.1 h1:e9Rjr40Z98/clHv5Yg79Is0NtosR5LXRvdr7o/6NwbA=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.1/go.mod h1:tIxuGz/9mpox++sgp9fJjHO0+q1X9/UOWd798aAm22M=
+github.com/gruyaume/charm-libraries/certificates v0.0.0-20250511074203-b132869b900c h1:W/qnUPBWhzi9LVPMTPmT8+eLyxj9MTntwE3I22w+vOw=
+github.com/gruyaume/charm-libraries/certificates v0.0.0-20250511074203-b132869b900c/go.mod h1:s98OeHSDrZs65nH/W2gshk1WAZl7c1+SpUe/N8eCttA=
+github.com/gruyaume/charm-libraries/prometheus v0.0.0-20250511074203-b132869b900c h1:c6XA9KY9lnn43WirsDTSloBtKmeFW67y+WXPRSw52Qw=
+github.com/gruyaume/charm-libraries/prometheus v0.0.0-20250511074203-b132869b900c/go.mod h1:C/8sPGWRC8K7xl+hHZOP/1lIrt28wmFADrez+5SFrpg=
+github.com/gruyaume/charm-libraries/tracing v0.0.0-20250511074203-b132869b900c h1:aQd1nc40EmTVpSw77uFwYKBSxGunWOEIBYHDhBf/m20=
+github.com/gruyaume/charm-libraries/tracing v0.0.0-20250511074203-b132869b900c/go.mod h1:HqePCEXTUDP10MgVzb6oPoricRlLlKJvC5tnqNxFZWc=
 github.com/gruyaume/goops v0.0.11 h1:OK7elw0mhJsRK2c+P32xXw0LwyA93Fch393jCHA0xnU=
 github.com/gruyaume/goops v0.0.11/go.mod h1:91Pt2hUN92i9M74tYVJ1ASmCXV+5UtAnMGKlQmz/21g=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=

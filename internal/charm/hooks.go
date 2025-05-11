@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	"github.com/canonical/pebble/client"
+	"github.com/gruyaume/charm-libraries/certificates"
+	"github.com/gruyaume/charm-libraries/prometheus"
 	"github.com/gruyaume/goops"
 	"github.com/gruyaume/goops/commands"
 	"github.com/gruyaume/goops/metadata"
-	"github.com/gruyaume/notary-k8s-operator/integrations/certificates"
-	"github.com/gruyaume/notary-k8s-operator/integrations/prometheus"
 	"github.com/gruyaume/notary-k8s-operator/internal/notary"
 	"go.opentelemetry.io/otel"
 )
@@ -259,7 +259,7 @@ func syncSelfSignedCertificate(hookContext *goops.HookContext, pebble *client.Cl
 
 func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.Client) (bool, error) {
 	changed := false
-	tlsIntegration := certificates.Integration{
+	tlsIntegration := certificates.IntegrationRequirer{
 		HookContext:  hookContext,
 		RelationName: TLSIntegrationName,
 		CertificateRequest: certificates.CertificateRequestAttributes{
