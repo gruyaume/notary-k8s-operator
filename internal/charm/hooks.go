@@ -19,19 +19,40 @@ import (
 )
 
 const (
-	KeyPath                = "/etc/notary/config/key.pem"
-	CertPath               = "/etc/notary/config/cert.pem"
-	ConfigPath             = "/etc/notary/config/notary.yaml"
-	APIPort                = 2111
-	CharmAccountUsername   = "charm@notary.com"
-	NotaryLoginSecretLabel = "NOTARY_LOGIN"
-	MetricsIntegrationName = "metrics"
-	TLSIntegrationName     = "certificates"
+	KeyPath                    = "/etc/notary/config/key.pem"
+	CertPath                   = "/etc/notary/config/cert.pem"
+	ConfigPath                 = "/etc/notary/config/notary.yaml"
+	APIPort                    = 2111
+	CharmAccountUsername       = "charm@notary.com"
+	NotaryLoginSecretLabel     = "NOTARY_LOGIN"
+	MetricsIntegrationName     = "metrics"
+	TLSRequiresIntegrationName = "access-certificates"
+	TLSProvidesIntegrationName = "certificates"
 )
 
-// HandleDefaultHook handles charm events. It is the main entry point for the charm.
+func setPorts(ctx context.Context, hookContext *goops.HookContext) error {
+	_, span := otel.Tracer("notary-k8s").Start(ctx, "Set Ports")
+	defer span.End()
+
+	setPortOpts := &commands.SetPortsOptions{
+		Ports: []*commands.Port{
+			{
+				Port:     APIPort,
+				Protocol: "tcp",
+			},
+		},
+	}
+
+	err := hookContext.Commands.SetPorts(setPortOpts)
+	if err != nil {
+		return fmt.Errorf("could not set ports: %w", err)
+	}
+
+	return nil
+}
+
 func HandleDefaultHook(ctx context.Context, hookContext *goops.HookContext) {
-	ctx, span := otel.Tracer("notary-k8s").Start(ctx, "HandleDefaultHook")
+	ctx, span := otel.Tracer("notary-k8s").Start(ctx, "Handle DefaultHook")
 	defer span.End()
 
 	err := ensureLeader(ctx, hookContext)
@@ -63,7 +84,7 @@ func HandleDefaultHook(ctx context.Context, hookContext *goops.HookContext) {
 		return
 	}
 
-	changed, err := syncCertificate(ctx, hookContext, pebble)
+	changed, err := syncAccessCertificate(ctx, hookContext, pebble)
 	if err != nil {
 		return
 	}
@@ -78,31 +99,47 @@ func HandleDefaultHook(ctx context.Context, hookContext *goops.HookContext) {
 		return
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Admin account created")
+	notaryClient := getLoggedInNotaryClient(hookContext, pebble)
+	if notaryClient == nil {
+		return
+	}
+
+	err = syncAccessCertificatesProvides(hookContext, notaryClient)
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not sync certificates provides:", err.Error())
+		return
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Certificates provider synced")
 }
 
-func setPorts(ctx context.Context, hookContext *goops.HookContext) error {
-	_, span := otel.Tracer("notary-k8s").Start(ctx, "setPorts")
-	defer span.End()
-
-	setPortOpts := &commands.SetPortsOptions{
-		Ports: []*commands.Port{
-			{
-				Port:     APIPort,
-				Protocol: "tcp",
-			},
-		},
-	}
-
-	err := hookContext.Commands.SetPorts(setPortOpts)
+func getLoggedInNotaryClient(hookContext *goops.HookContext, pebble *client.Client) *notary.Client {
+	cert, err := getFileContent(pebble, CertPath)
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not set ports:", err.Error())
-		return fmt.Errorf("could not set ports: %w", err)
+		hookContext.Commands.JujuLog(commands.Error, "Certificate is not available", err.Error())
+		return nil
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Ports set")
+	if cert == "" {
+		hookContext.Commands.JujuLog(commands.Error, "Certificate is empty")
+		return nil
+	}
 
-	return nil
+	notaryClient, err := getNotaryClient(cert)
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not create notary client:", err.Error())
+		return nil
+	}
+
+	err = loginNotaryClient(hookContext, notaryClient)
+	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not login to Notary client", err.Error())
+		return nil
+	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Logged in to notary")
+
+	return notaryClient
 }
 
 func ensureLeader(ctx context.Context, hookContext *goops.HookContext) error {
@@ -157,7 +194,7 @@ func writePrometheus(ctx context.Context, hookContext *goops.HookContext, charmN
 }
 
 func syncConfig(ctx context.Context, hookContext *goops.HookContext, pebble *client.Client) error {
-	_, span := otel.Tracer("notary-k8s").Start(ctx, "syncConfig")
+	_, span := otel.Tracer("notary-k8s").Start(ctx, "Sync Config")
 	defer span.End()
 
 	expectedConfig, err := getExpectedConfig()
@@ -178,7 +215,7 @@ func syncConfig(ctx context.Context, hookContext *goops.HookContext, pebble *cli
 }
 
 func syncPebbleService(ctx context.Context, hookContext *goops.HookContext, pebble *client.Client, restart bool) error {
-	_, span := otel.Tracer("notary-k8s").Start(ctx, "syncPebbleService")
+	_, span := otel.Tracer("notary-k8s").Start(ctx, "sync PebbleService")
 	defer span.End()
 
 	err := addPebbleLayer(pebble)
@@ -210,9 +247,106 @@ func syncPebbleService(ctx context.Context, hookContext *goops.HookContext, pebb
 	return nil
 }
 
-func tlsIntegrationCreated(hookContext *goops.HookContext) bool {
+func accessCertificatesIntegrationCreated(hookContext *goops.HookContext) bool {
 	relationIDs, err := hookContext.Commands.RelationIDs(&commands.RelationIDsOptions{
-		Name: TLSIntegrationName,
+		Name: TLSRequiresIntegrationName,
+	})
+	if err != nil {
+		return false
+	}
+
+	if len(relationIDs) == 0 {
+		return false
+	}
+
+	return true
+}
+
+// syncAccessCertificatesProvides provides TLS certificates to TLS requirers
+func syncAccessCertificatesProvides(hookContext *goops.HookContext, notaryClient *notary.Client) error {
+	if !integrationCreated(hookContext, TLSProvidesIntegrationName) {
+		return nil
+	}
+
+	tlsProviderIntegration := certificates.IntegrationProvider{
+		HookContext:  hookContext,
+		RelationName: TLSProvidesIntegrationName,
+	}
+
+	databagCertRequests, err := tlsProviderIntegration.GetOutstandingCertificateRequests()
+	if err != nil {
+		return fmt.Errorf("could not get certificate requests: %w", err)
+	}
+
+	for _, databagCertRequest := range databagCertRequests {
+		hookContext.Commands.JujuLog(commands.Info, "Databag certificate request:", databagCertRequest.CertificateSigningRequest.Raw)
+	}
+
+	notaryCertRequests, err := notaryClient.ListCertificateRequests()
+	if err != nil {
+		return fmt.Errorf("could not list certificate requests: %w", err)
+	}
+
+	for _, notaryCertRequest := range notaryCertRequests {
+		hookContext.Commands.JujuLog(commands.Info, "Notary certificate request:", notaryCertRequest.CSR)
+	}
+
+	return nil
+}
+
+func getNotaryClient(certPEM string) (*notary.Client, error) {
+	roots := x509.NewCertPool()
+	if ok := roots.AppendCertsFromPEM([]byte(certPEM)); !ok {
+		return nil, fmt.Errorf("failed to parse root certificate PEM")
+	}
+
+	clientConfig := &notary.Config{
+		BaseURL: "https://127.0.0.1:" + fmt.Sprint(APIPort),
+		TLSConfig: &tls.Config{
+			RootCAs: roots,
+		},
+	}
+
+	client, err := notary.New(clientConfig)
+	if err != nil {
+		return nil, fmt.Errorf("could not create notary client: %w", err)
+	}
+
+	return client, nil
+}
+
+func loginNotaryClient(hookContext *goops.HookContext, client *notary.Client) error {
+	secret, err := hookContext.Commands.SecretGet(&commands.SecretGetOptions{
+		Refresh: true,
+		Label:   NotaryLoginSecretLabel,
+	})
+	if err != nil {
+		return fmt.Errorf("could not get secret: %w", err)
+	}
+
+	if secret == nil {
+		return fmt.Errorf("secret is empty")
+	}
+
+	password := secret["password"]
+	if password == "" {
+		return fmt.Errorf("password is empty")
+	}
+
+	err = client.Login(&notary.LoginOptions{
+		Username: CharmAccountUsername,
+		Password: password,
+	})
+	if err != nil {
+		return fmt.Errorf("could not login to notary: %w", err)
+	}
+
+	return nil
+}
+
+func integrationCreated(hookContext *goops.HookContext, name string) bool {
+	relationIDs, err := hookContext.Commands.RelationIDs(&commands.RelationIDsOptions{
+		Name: name,
 	})
 	if err != nil {
 		return false
@@ -257,11 +391,13 @@ func syncSelfSignedCertificate(hookContext *goops.HookContext, pebble *client.Cl
 	return true, nil
 }
 
+// syncTlsProviderCertificate makes a certificate request to the TLS provider
+// and pushes the certificate and key to the pebble client.
 func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.Client) (bool, error) {
 	changed := false
-	tlsIntegration := certificates.IntegrationRequirer{
+	tlsRequirerIntegration := certificates.IntegrationRequirer{
 		HookContext:  hookContext,
-		RelationName: TLSIntegrationName,
+		RelationName: TLSRequiresIntegrationName,
 		CertificateRequest: certificates.CertificateRequestAttributes{
 			CommonName:          getHostname(hookContext),
 			SansDNS:             []string{getHostname(hookContext)},
@@ -272,14 +408,14 @@ func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.C
 		},
 	}
 
-	err := tlsIntegration.Request()
+	err := tlsRequirerIntegration.Request()
 	if err != nil {
 		return changed, fmt.Errorf("could not request certificate: %w", err)
 	}
 
 	hookContext.Commands.JujuLog(commands.Info, "Certificate requested")
 
-	providerCert, err := tlsIntegration.GetProviderCertificate()
+	providerCert, err := tlsRequirerIntegration.GetProviderCertificate()
 	if err != nil {
 		return changed, fmt.Errorf("could not get certificate: %w", err)
 	}
@@ -294,7 +430,7 @@ func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.C
 
 	hookContext.Commands.JujuLog(commands.Info, "Certificate received")
 
-	privateKey, err := tlsIntegration.GetPrivateKey()
+	privateKey, err := tlsRequirerIntegration.GetPrivateKey()
 	if err != nil {
 		return changed, fmt.Errorf("could not get private key: %w", err)
 	}
@@ -331,16 +467,16 @@ func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.C
 	return changed, nil
 }
 
-func syncCertificate(ctx context.Context, hookContext *goops.HookContext, pebble *client.Client) (bool, error) {
-	_, span := otel.Tracer("notary-k8s").Start(ctx, "syncCertificate")
+func syncAccessCertificate(ctx context.Context, hookContext *goops.HookContext, pebble *client.Client) (bool, error) {
+	_, span := otel.Tracer("notary-k8s").Start(ctx, "Sync AccessCertificate")
 	defer span.End()
 
 	var changed bool
 
 	var err error
 
-	if !tlsIntegrationCreated(hookContext) {
-		hookContext.Commands.JujuLog(commands.Info, "TLS integration not created")
+	if !accessCertificatesIntegrationCreated(hookContext) {
+		hookContext.Commands.JujuLog(commands.Info, "`access-certificates` integration not created")
 
 		changed, err = syncSelfSignedCertificate(hookContext, pebble)
 		if err != nil {

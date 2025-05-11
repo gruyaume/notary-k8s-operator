@@ -45,12 +45,16 @@ resources:
     upstream-source: ghcr.io/canonical/notary:0.0.3
 
 provides:
+  certificates:
+    interface: tls-certificates
   metrics:
     interface: prometheus_scrape
 
 requires:
-  certificates:
+  access-certificates:
+    limit: 1
     interface: tls-certificates
+    optional: true
   tracing:
     interface: tracing
     limit: 1
