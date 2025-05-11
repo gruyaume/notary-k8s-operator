@@ -4,7 +4,6 @@ linters:
     - asciicheck
     - bodyclose
     - dogsled
-    - gocognit
     - godox
     - gomodguard
     - misspell

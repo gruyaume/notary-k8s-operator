@@ -71,18 +71,18 @@ func (c *Client) RequestCertificate(opts *CreateCertificateRequestOptions) error
 }
 
 func Serialize(pemString string) []string {
-	// split out each certificate block (without the END marker)
 	parts := bytes.Split([]byte(pemString), []byte("-----END CERTIFICATE-----"))
 
 	var serialized []string
+
 	for _, part := range parts {
-		// trim any leading/trailing newlines or whitespace
 		trimmed := strings.Trim(string(part), "\n\r\t ")
 		if trimmed == "" {
 			continue
 		}
-		// re-append the END marker (no extra newline)
+
 		serialized = append(serialized, trimmed+"-----END CERTIFICATE-----")
 	}
+
 	return serialized
 }
