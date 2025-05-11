@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/canonical/pebble v1.21.0
-	github.com/gruyaume/charm-libraries/certificates v0.0.0-20250511074203-b132869b900c
+	github.com/gruyaume/charm-libraries/certificates v0.0.0-20250511104529-05729de7dd80
 	github.com/gruyaume/charm-libraries/prometheus v0.0.0-20250511074203-b132869b900c
 	github.com/gruyaume/charm-libraries/tracing v0.0.0-20250511074203-b132869b900c
 	github.com/gruyaume/goops v0.0.11

@@ -104,13 +104,10 @@ func HandleDefaultHook(ctx context.Context, hookContext *goops.HookContext) {
 		return
 	}
 
-	err = syncAccessCertificatesProvides(hookContext, notaryClient)
+	err = syncCertificatesProvides(hookContext, notaryClient)
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not sync certificates provides:", err.Error())
 		return
 	}
-
-	hookContext.Commands.JujuLog(commands.Info, "Certificates provider synced")
 }
 
 func getLoggedInNotaryClient(hookContext *goops.HookContext, pebble *client.Client) *notary.Client {
@@ -262,8 +259,8 @@ func accessCertificatesIntegrationCreated(hookContext *goops.HookContext) bool {
 	return true
 }
 
-// syncAccessCertificatesProvides provides TLS certificates to TLS requirers
-func syncAccessCertificatesProvides(hookContext *goops.HookContext, notaryClient *notary.Client) error {
+// syncCertificatesProvides provides TLS certificates to TLS requirers
+func syncCertificatesProvides(hookContext *goops.HookContext, notaryClient *notary.Client) error {
 	if !integrationCreated(hookContext, TLSProvidesIntegrationName) {
 		return nil
 	}
@@ -275,20 +272,67 @@ func syncAccessCertificatesProvides(hookContext *goops.HookContext, notaryClient
 
 	databagCertRequests, err := tlsProviderIntegration.GetOutstandingCertificateRequests()
 	if err != nil {
-		return fmt.Errorf("could not get certificate requests: %w", err)
-	}
-
-	for _, databagCertRequest := range databagCertRequests {
-		hookContext.Commands.JujuLog(commands.Info, "Databag certificate request:", databagCertRequest.CertificateSigningRequest.Raw)
+		return fmt.Errorf("could not list databag certificate requests: %w", err)
 	}
 
 	notaryCertRequests, err := notaryClient.ListCertificateRequests()
 	if err != nil {
-		return fmt.Errorf("could not list certificate requests: %w", err)
+		return fmt.Errorf("could not list notary certificate requests: %w", err)
 	}
 
-	for _, notaryCertRequest := range notaryCertRequests {
-		hookContext.Commands.JujuLog(commands.Info, "Notary certificate request:", notaryCertRequest.CSR)
+	notaryCSRsWithMatchingDatabagCSR := []*notary.CertificateRequest{}
+
+	for _, databagCertRequest := range databagCertRequests {
+		for _, notaryCertRequest := range notaryCertRequests {
+			if notaryCertRequest.CSR == databagCertRequest.CertificateSigningRequest.Raw {
+				notaryCSRsWithMatchingDatabagCSR = append(notaryCSRsWithMatchingDatabagCSR, notaryCertRequest)
+			}
+		}
+
+		if len(notaryCSRsWithMatchingDatabagCSR) > 1 {
+			hookContext.Commands.JujuLog(commands.Error, "Multiple notary certificate requests found for databag certificate request")
+			return fmt.Errorf("multiple notary certificate requests found for databag certificate request")
+		}
+
+		if len(notaryCSRsWithMatchingDatabagCSR) == 0 {
+			hookContext.Commands.JujuLog(commands.Info, "No matching notary certificate request found for databag certificate request")
+
+			err := notaryClient.RequestCertificate(&notary.CreateCertificateRequestOptions{
+				CSR: databagCertRequest.CertificateSigningRequest.Raw,
+			})
+			if err != nil {
+				hookContext.Commands.JujuLog(commands.Info, "Could not request certificate:", err.Error())
+			}
+
+			hookContext.Commands.JujuLog(commands.Info, "Certificate request sent to notary")
+		}
+
+		if len(notaryCSRsWithMatchingDatabagCSR) == 1 {
+			providerCerts, _ := tlsProviderIntegration.GetIssuedCertificates(databagCertRequest.RelationID)
+
+			certificatesProvidedforCSR := []*certificates.ProviderCertificate{}
+
+			for _, cert := range providerCerts {
+				if cert.CertificateSigningRequest == notaryCSRsWithMatchingDatabagCSR[0].CSR {
+					certificatesProvidedforCSR = append(certificatesProvidedforCSR, cert)
+				}
+			}
+
+			chainList := notary.Serialize(notaryCSRsWithMatchingDatabagCSR[0].CertificateChain)
+			if len(certificatesProvidedforCSR) == 0 && notaryCSRsWithMatchingDatabagCSR[0].Status == "Active" {
+				err := tlsProviderIntegration.SetRelationCertificate(&certificates.SetRelationCertificateOptions{
+					RelationID:                databagCertRequest.RelationID,
+					CA:                        chainList[1],
+					Chain:                     chainList,
+					CertificateSigningRequest: databagCertRequest.CertificateSigningRequest.Raw,
+					Certificate:               chainList[0],
+				})
+				if err != nil {
+					hookContext.Commands.JujuLog(commands.Error, "Could not set relation certificate:", err.Error())
+					return fmt.Errorf("could not set relation certificate: %w", err)
+				}
+			}
+		}
 	}
 
 	return nil
@@ -519,7 +563,7 @@ func SetStatus(ctx context.Context, hookContext *goops.HookContext) {
 }
 
 func createAdminAccount(ctx context.Context, hookContext *goops.HookContext, pebble *client.Client) error {
-	_, span := otel.Tracer("notary-k8s").Start(ctx, "createAdminAccount")
+	_, span := otel.Tracer("notary-k8s").Start(ctx, "Create AdminAccount")
 	defer span.End()
 
 	cert, err := getFileContent(pebble, CertPath)
@@ -547,11 +591,13 @@ func createAdminAccount(ctx context.Context, hookContext *goops.HookContext, peb
 
 	client, err := notary.New(clientConfig)
 	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not create notary client:", err.Error())
 		return fmt.Errorf("could not create notary client: %w", err)
 	}
 
 	status, err := client.GetStatus()
 	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not get status:", err.Error())
 		return fmt.Errorf("could not get status: %w", err)
 	}
 
@@ -561,10 +607,12 @@ func createAdminAccount(ctx context.Context, hookContext *goops.HookContext, peb
 
 	password, err := getOrGenerateNotaryPassword(hookContext)
 	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not get or generate password:", err.Error())
 		return fmt.Errorf("could not get or generate password: %w", err)
 	}
 
 	if password == "" {
+		hookContext.Commands.JujuLog(commands.Error, "Password is empty")
 		return fmt.Errorf("could not get password from secret")
 	}
 
@@ -573,8 +621,11 @@ func createAdminAccount(ctx context.Context, hookContext *goops.HookContext, peb
 		Password: password,
 	})
 	if err != nil {
+		hookContext.Commands.JujuLog(commands.Error, "Could not create account:", err.Error())
 		return fmt.Errorf("could not create account: %w", err)
 	}
+
+	hookContext.Commands.JujuLog(commands.Info, "Account created")
 
 	return nil
 }
