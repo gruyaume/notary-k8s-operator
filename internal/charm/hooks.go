@@ -268,7 +268,7 @@ func syncCertificatesProvides(hookContext *goops.HookContext, notaryClient *nota
 	}
 
 	for _, dr := range databagReqs {
-		csr := dr.CertificateSigningRequest.Raw // now a string
+		csr := dr.CertificateSigningRequest.Raw
 		matches := findNotaryRequestsByCSR(csr, notaryReqs)
 
 		switch len(matches) {
@@ -290,13 +290,7 @@ func syncCertificatesProvides(hookContext *goops.HookContext, notaryClient *nota
 				continue
 			}
 
-			issued, err := provider.GetIssuedCertificates(dr.RelationID)
-			if err != nil {
-				hookContext.Commands.JujuLog(commands.Error, "Could not fetch issued certificates:", err.Error())
-				continue
-			}
-
-			if alreadyProvided(issued, csr) {
+			if provider.AlreadyProvided(dr.RelationID, csr) {
 				continue
 			}
 
@@ -329,17 +323,6 @@ func findNotaryRequestsByCSR(csr string, reqs []*notary.CertificateRequest) []*n
 	}
 
 	return out
-}
-
-// alreadyProvided checks if we've already pushed this CSR into the relation.
-func alreadyProvided(providerCerts []*certificates.ProviderCertificate, csr string) bool {
-	for _, pc := range providerCerts {
-		if pc.CertificateSigningRequest == csr {
-			return true
-		}
-	}
-
-	return false
 }
 
 func sendCertificate(
@@ -425,7 +408,7 @@ func syncSelfSignedCertificate(hookContext *goops.HookContext, pebble *client.Cl
 		return false, nil
 	}
 
-	cert, key, err := GenerateCertificate(&GenerateCertificateOpts{
+	cert, key, err := certificates.GenerateCertificate(&certificates.GenerateCertificateOpts{
 		CommonName:       "127.0.0.1",
 		ValidityDuration: 365 * 24 * time.Hour,
 		SANIPAddresses:   []net.IP{net.ParseIP("127.0.0.1")},
