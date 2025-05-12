@@ -13,7 +13,18 @@ import (
 	"time"
 )
 
-func generateCertificate() (certPEM string, keyPEM string, err error) {
+type GenerateCertificateOpts struct {
+	CommonName          string
+	Organization        string
+	OrganizationalUnit  string
+	CountryName         string
+	StateOrProvinceName string
+	LocalityName        string
+	SANIPAddresses      []net.IP
+	ValidityDuration    time.Duration
+}
+
+func GenerateCertificate(opts *GenerateCertificateOpts) (certPEM string, keyPEM string, err error) {
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to generate private key: %w", err)
@@ -29,16 +40,20 @@ func generateCertificate() (certPEM string, keyPEM string, err error) {
 	template := x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
-			Organization: []string{"Example Co"},
-			CommonName:   "127.0.0.1",
+			Organization:       []string{opts.Organization},
+			CommonName:         opts.CommonName,
+			Country:            []string{opts.CountryName},
+			Province:           []string{opts.StateOrProvinceName},
+			Locality:           []string{opts.LocalityName},
+			OrganizationalUnit: []string{opts.OrganizationalUnit},
 		},
 		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // 1 year
+		NotAfter:              time.Now().Add(opts.ValidityDuration), // 1 year
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  false,
-		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+		IPAddresses:           opts.SANIPAddresses,
 	}
 
 	derCert, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)

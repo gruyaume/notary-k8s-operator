@@ -6,7 +6,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net"
 	"strings"
+	"time"
 
 	"github.com/canonical/pebble/client"
 	"github.com/gruyaume/charm-libraries/certificates"
@@ -122,7 +124,7 @@ func getLoggedInNotaryClient(hookContext *goops.HookContext, pebble *client.Clie
 		return nil
 	}
 
-	notaryClient, err := getNotaryClient(cert)
+	notaryClient, err := NewNotaryClient(cert)
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Error, "Could not create notary client:", err.Error())
 		return nil
@@ -244,119 +246,131 @@ func syncPebbleService(ctx context.Context, hookContext *goops.HookContext, pebb
 	return nil
 }
 
-func accessCertificatesIntegrationCreated(hookContext *goops.HookContext) bool {
-	relationIDs, err := hookContext.Commands.RelationIDs(&commands.RelationIDsOptions{
-		Name: TLSRequiresIntegrationName,
-	})
-	if err != nil {
-		return false
-	}
-
-	if len(relationIDs) == 0 {
-		return false
-	}
-
-	return true
-}
-
-// syncCertificatesProvides provides TLS certificates to TLS requirers
+// syncCertificatesProvides provides TLS certificates to TLS requirers.
 func syncCertificatesProvides(hookContext *goops.HookContext, notaryClient *notary.Client) error {
 	if !integrationCreated(hookContext, TLSProvidesIntegrationName) {
 		return nil
 	}
 
-	tlsProviderIntegration := certificates.IntegrationProvider{
+	provider := certificates.IntegrationProvider{
 		HookContext:  hookContext,
 		RelationName: TLSProvidesIntegrationName,
 	}
 
-	databagCertRequests, err := tlsProviderIntegration.GetOutstandingCertificateRequests()
+	databagReqs, err := provider.GetOutstandingCertificateRequests()
 	if err != nil {
 		return fmt.Errorf("could not list databag certificate requests: %w", err)
 	}
 
-	notaryCertRequests, err := notaryClient.ListCertificateRequests()
+	notaryReqs, err := notaryClient.ListCertificateRequests()
 	if err != nil {
 		return fmt.Errorf("could not list notary certificate requests: %w", err)
 	}
 
-	notaryCSRsWithMatchingDatabagCSR := []*notary.CertificateRequest{}
+	for _, dr := range databagReqs {
+		csr := dr.CertificateSigningRequest.Raw // now a string
+		matches := findNotaryRequestsByCSR(csr, notaryReqs)
 
-	for _, databagCertRequest := range databagCertRequests {
-		for _, notaryCertRequest := range notaryCertRequests {
-			if notaryCertRequest.CSR == databagCertRequest.CertificateSigningRequest.Raw {
-				notaryCSRsWithMatchingDatabagCSR = append(notaryCSRsWithMatchingDatabagCSR, notaryCertRequest)
-			}
-		}
+		switch len(matches) {
+		case 0: // No matching Certificate Request in Notary
+			hookContext.Commands.JujuLog(commands.Info, "No matching notary certificate request found; sending new request")
 
-		if len(notaryCSRsWithMatchingDatabagCSR) > 1 {
-			hookContext.Commands.JujuLog(commands.Error, "Multiple notary certificate requests found for databag certificate request")
-			return fmt.Errorf("multiple notary certificate requests found for databag certificate request")
-		}
-
-		if len(notaryCSRsWithMatchingDatabagCSR) == 0 {
-			hookContext.Commands.JujuLog(commands.Info, "No matching notary certificate request found for databag certificate request")
-
-			err := notaryClient.RequestCertificate(&notary.CreateCertificateRequestOptions{
-				CSR: databagCertRequest.CertificateSigningRequest.Raw,
-			})
+			err := notaryClient.RequestCertificate(&notary.CreateCertificateRequestOptions{CSR: csr})
 			if err != nil {
-				hookContext.Commands.JujuLog(commands.Info, "Could not request certificate:", err.Error())
+				hookContext.Commands.JujuLog(commands.Error, "Could not request certificate:", err.Error())
+				return fmt.Errorf("could not request certificate: %w", err)
 			}
 
 			hookContext.Commands.JujuLog(commands.Info, "Certificate request sent to notary")
-		}
 
-		if len(notaryCSRsWithMatchingDatabagCSR) == 1 {
-			providerCerts, _ := tlsProviderIntegration.GetIssuedCertificates(databagCertRequest.RelationID)
-
-			certificatesProvidedforCSR := []*certificates.ProviderCertificate{}
-
-			for _, cert := range providerCerts {
-				if cert.CertificateSigningRequest == notaryCSRsWithMatchingDatabagCSR[0].CSR {
-					certificatesProvidedforCSR = append(certificatesProvidedforCSR, cert)
-				}
+		case 1: // One matching Certificate Request in Notary
+			nr := matches[0]
+			if nr.Status != "Active" {
+				hookContext.Commands.JujuLog(commands.Debug, "Notary certificate request is not active")
+				continue
 			}
 
-			chainList := notary.Serialize(notaryCSRsWithMatchingDatabagCSR[0].CertificateChain)
-			if len(certificatesProvidedforCSR) == 0 && notaryCSRsWithMatchingDatabagCSR[0].Status == "Active" {
-				err := tlsProviderIntegration.SetRelationCertificate(&certificates.SetRelationCertificateOptions{
-					RelationID:                databagCertRequest.RelationID,
-					CA:                        chainList[1],
-					Chain:                     chainList,
-					CertificateSigningRequest: databagCertRequest.CertificateSigningRequest.Raw,
-					Certificate:               chainList[0],
-				})
-				if err != nil {
-					hookContext.Commands.JujuLog(commands.Error, "Could not set relation certificate:", err.Error())
-					return fmt.Errorf("could not set relation certificate: %w", err)
-				}
+			issued, err := provider.GetIssuedCertificates(dr.RelationID)
+			if err != nil {
+				hookContext.Commands.JujuLog(commands.Error, "Could not fetch issued certificates:", err.Error())
+				continue
 			}
+
+			if alreadyProvided(issued, csr) {
+				continue
+			}
+
+			if err := sendCertificate(provider, dr.RelationID, nr); err != nil {
+				hookContext.Commands.JujuLog(commands.Error,
+					"Could not set relation certificate:", err.Error())
+				return fmt.Errorf("could not set relation certificate: %w", err)
+			}
+
+			hookContext.Commands.JujuLog(commands.Info, "Relation certificate set")
+
+		default: // Multiple matching Certificate Requests in Notary
+			hookContext.Commands.JujuLog(commands.Error,
+				"Multiple notary certificate requests found for databag certificate request")
+			return fmt.Errorf("multiple notary certificate requests found for databag certificate request")
 		}
 	}
 
 	return nil
 }
 
-func getNotaryClient(certPEM string) (*notary.Client, error) {
+// findNotaryRequestsByCSR returns all Notary requests whose CSR exactly matches.
+func findNotaryRequestsByCSR(csr string, reqs []*notary.CertificateRequest) []*notary.CertificateRequest {
+	var out []*notary.CertificateRequest
+
+	for _, r := range reqs {
+		if r.CSR == csr {
+			out = append(out, r)
+		}
+	}
+
+	return out
+}
+
+// alreadyProvided checks if we've already pushed this CSR into the relation.
+func alreadyProvided(providerCerts []*certificates.ProviderCertificate, csr string) bool {
+	for _, pc := range providerCerts {
+		if pc.CertificateSigningRequest == csr {
+			return true
+		}
+	}
+
+	return false
+}
+
+func sendCertificate(
+	provider certificates.IntegrationProvider,
+	relationID string,
+	req *notary.CertificateRequest,
+) error {
+	chain := notary.Serialize(req.CertificateChain)
+	opts := &certificates.SetRelationCertificateOptions{
+		RelationID:                relationID,
+		CA:                        chain[1],
+		Chain:                     chain,
+		CertificateSigningRequest: req.CSR,
+		Certificate:               chain[0],
+	}
+
+	return provider.SetRelationCertificate(opts)
+}
+
+func NewNotaryClient(certPEM string) (*notary.Client, error) {
 	roots := x509.NewCertPool()
 	if ok := roots.AppendCertsFromPEM([]byte(certPEM)); !ok {
-		return nil, fmt.Errorf("failed to parse root certificate PEM")
+		return nil, fmt.Errorf("invalid root cert PEM")
 	}
 
-	clientConfig := &notary.Config{
-		BaseURL: "https://127.0.0.1:" + fmt.Sprint(APIPort),
-		TLSConfig: &tls.Config{
-			RootCAs: roots,
-		},
+	cfg := &notary.Config{
+		BaseURL:   fmt.Sprintf("https://127.0.0.1:%d", APIPort),
+		TLSConfig: &tls.Config{RootCAs: roots},
 	}
 
-	client, err := notary.New(clientConfig)
-	if err != nil {
-		return nil, fmt.Errorf("could not create notary client: %w", err)
-	}
-
-	return client, nil
+	return notary.New(cfg)
 }
 
 func loginNotaryClient(hookContext *goops.HookContext, client *notary.Client) error {
@@ -411,7 +425,11 @@ func syncSelfSignedCertificate(hookContext *goops.HookContext, pebble *client.Cl
 		return false, nil
 	}
 
-	cert, key, err := generateCertificate()
+	cert, key, err := GenerateCertificate(&GenerateCertificateOpts{
+		CommonName:       "127.0.0.1",
+		ValidityDuration: 365 * 24 * time.Hour,
+		SANIPAddresses:   []net.IP{net.ParseIP("127.0.0.1")},
+	})
 	if err != nil {
 		return false, fmt.Errorf("could not generate certificate: %w", err)
 	}
@@ -519,7 +537,7 @@ func syncAccessCertificate(ctx context.Context, hookContext *goops.HookContext, 
 
 	var err error
 
-	if !accessCertificatesIntegrationCreated(hookContext) {
+	if !integrationCreated(hookContext, TLSRequiresIntegrationName) {
 		hookContext.Commands.JujuLog(commands.Info, "`access-certificates` integration not created")
 
 		changed, err = syncSelfSignedCertificate(hookContext, pebble)
@@ -577,25 +595,13 @@ func createAdminAccount(ctx context.Context, hookContext *goops.HookContext, peb
 		return fmt.Errorf("certificate is empty")
 	}
 
-	roots := x509.NewCertPool()
-	if ok := roots.AppendCertsFromPEM([]byte(cert)); !ok {
-		return fmt.Errorf("failed to parse root certificate PEM")
-	}
-
-	clientConfig := &notary.Config{
-		BaseURL: "https://127.0.0.1:" + fmt.Sprint(APIPort),
-		TLSConfig: &tls.Config{
-			RootCAs: roots,
-		},
-	}
-
-	client, err := notary.New(clientConfig)
+	notaryClient, err := NewNotaryClient(cert)
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Error, "Could not create notary client:", err.Error())
 		return fmt.Errorf("could not create notary client: %w", err)
 	}
 
-	status, err := client.GetStatus()
+	status, err := notaryClient.GetStatus()
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Error, "Could not get status:", err.Error())
 		return fmt.Errorf("could not get status: %w", err)
@@ -616,7 +622,7 @@ func createAdminAccount(ctx context.Context, hookContext *goops.HookContext, peb
 		return fmt.Errorf("could not get password from secret")
 	}
 
-	err = client.CreateAccount(&notary.CreateAccountOptions{
+	err = notaryClient.CreateAccount(&notary.CreateAccountOptions{
 		Username: CharmAccountUsername,
 		Password: password,
 	})
