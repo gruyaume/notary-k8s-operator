@@ -33,12 +33,11 @@ func pushFile(pebbleClient *client.Client, content string, path string) error {
 	}
 
 	source := strings.NewReader(content)
-	pushOptions := &client.PushOptions{
+
+	err = pebbleClient.Push(&client.PushOptions{
 		Source: source,
 		Path:   path,
-	}
-
-	err = pebbleClient.Push(pushOptions)
+	})
 	if err != nil {
 		return fmt.Errorf("could not push file: %w", err)
 	}
@@ -48,12 +47,11 @@ func pushFile(pebbleClient *client.Client, content string, path string) error {
 
 func getFileContent(pebbleClient *client.Client, path string) (string, error) {
 	target := &bytes.Buffer{}
-	opts := &client.PullOptions{
+
+	err := pebbleClient.Pull(&client.PullOptions{
 		Path:   path,
 		Target: target,
-	}
-
-	err := pebbleClient.Pull(opts)
+	})
 	if err != nil {
 		return "", fmt.Errorf("could not get file content: %w", err)
 	}
@@ -78,13 +76,11 @@ func addPebbleLayer(pebbleClient *client.Client) error {
 		return fmt.Errorf("could not marshal layer data to YAML: %w", err)
 	}
 
-	addLayerOpts := &client.AddLayerOptions{
+	err = pebbleClient.AddLayer(&client.AddLayerOptions{
 		Combine:   true,
 		Label:     "notary",
 		LayerData: layerData,
-	}
-
-	err = pebbleClient.AddLayer(addLayerOpts)
+	})
 	if err != nil {
 		return fmt.Errorf("could not add pebble layer: %w", err)
 	}
@@ -93,11 +89,9 @@ func addPebbleLayer(pebbleClient *client.Client) error {
 }
 
 func startPebbleService(pebbleClient *client.Client) error {
-	serviceOpts := &client.ServiceOptions{
+	_, err := pebbleClient.Start(&client.ServiceOptions{
 		Names: []string{"notary"},
-	}
-
-	_, err := pebbleClient.Start(serviceOpts)
+	})
 	if err != nil {
 		return fmt.Errorf("could not start pebble service: %w", err)
 	}
@@ -106,11 +100,9 @@ func startPebbleService(pebbleClient *client.Client) error {
 }
 
 func restartPebbleService(pebbleClient *client.Client) error {
-	serviceOpts := &client.ServiceOptions{
+	_, err := pebbleClient.Restart(&client.ServiceOptions{
 		Names: []string{"notary"},
-	}
-
-	_, err := pebbleClient.Restart(serviceOpts)
+	})
 	if err != nil {
 		return fmt.Errorf("could not restart pebble service: %w", err)
 	}
