@@ -7,7 +7,7 @@ require (
 	github.com/gruyaume/charm-libraries/certificates v0.0.0-20250512055438-198e951c4be2
 	github.com/gruyaume/charm-libraries/logging v0.0.0-20250515135041-53a0de11925d
 	github.com/gruyaume/charm-libraries/prometheus v0.0.0-20250512055438-198e951c4be2
-	github.com/gruyaume/goops v0.0.11
+	github.com/gruyaume/goops v0.0.12
 	gopkg.in/yaml.v3 v3.0.1
 )
 
