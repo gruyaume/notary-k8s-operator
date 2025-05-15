@@ -4,18 +4,8 @@ This charm is a Proof of Concept for validating the [goops](https://github.com/g
 
 The charm supports many typical charm integrations, including:
 - `metrics` for Prometheus scraping
-- `tracing` for OpenTelemetry
+- `logging` for sending logs to Loki
 - `certificates` for TLS certificate management
-
-The tracing integration here is especially interesting since we could use it to gather insight into performance improvements from using `goops`:
-
-<p align="center">
-  <img src="docs/traces.png" width="350" title="Charm traces">
-</p>
-
-<p align="center">
-  <i>OpenTelemetry Charm Traces.</i>
-</p>
 
 ## Getting Started
 

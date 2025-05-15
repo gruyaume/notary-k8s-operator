@@ -55,6 +55,6 @@ requires:
     limit: 1
     interface: tls-certificates
     optional: true
-  tracing:
-    interface: tracing
+  logging:
+    interface: loki_push_api
     limit: 1
