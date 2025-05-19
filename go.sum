@@ -9,8 +9,8 @@ github.com/gruyaume/charm-libraries/logging v0.0.0-20250515135041-53a0de11925d h
 github.com/gruyaume/charm-libraries/logging v0.0.0-20250515135041-53a0de11925d/go.mod h1:xAvjxmOG/rUwIb/uDkY5Sn3VZqTNMoxf4j+Ibf7GESk=
 github.com/gruyaume/charm-libraries/prometheus v0.0.0-20250512055438-198e951c4be2 h1:FhBBOVL641XaUwvZex64VwFdqHAY7RpdGr9D8MsRK3U=
 github.com/gruyaume/charm-libraries/prometheus v0.0.0-20250512055438-198e951c4be2/go.mod h1:C/8sPGWRC8K7xl+hHZOP/1lIrt28wmFADrez+5SFrpg=
-github.com/gruyaume/goops v0.0.11 h1:OK7elw0mhJsRK2c+P32xXw0LwyA93Fch393jCHA0xnU=
-github.com/gruyaume/goops v0.0.11/go.mod h1:91Pt2hUN92i9M74tYVJ1ASmCXV+5UtAnMGKlQmz/21g=
+github.com/gruyaume/goops v0.0.12 h1:P9yn2/GKz2WFKiqb3+7gWzNBbJdazvY7+FXYnX/H+Tw=
+github.com/gruyaume/goops v0.0.12/go.mod h1:91Pt2hUN92i9M74tYVJ1ASmCXV+5UtAnMGKlQmz/21g=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
 github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
 github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
