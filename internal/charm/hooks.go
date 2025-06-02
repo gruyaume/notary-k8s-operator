@@ -15,7 +15,6 @@ import (
 	"github.com/gruyaume/charm-libraries/prometheus"
 	"github.com/gruyaume/goops"
 	"github.com/gruyaume/goops/commands"
-	"github.com/gruyaume/goops/metadata"
 	"github.com/gruyaume/notary-k8s-operator/internal/notary"
 )
 
@@ -147,16 +146,10 @@ func ensureLeader(hookContext *goops.HookContext) error {
 }
 
 func writePrometheus(hookContext *goops.HookContext) {
-	meta, err := metadata.GetCharmMetadata(hookContext.Environment)
-	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not get charm metadata:", err.Error())
-		return
-	}
-
 	prometheusIntegration := &prometheus.Integration{
 		HookContext:  hookContext,
 		RelationName: MetricsIntegrationName,
-		CharmName:    meta.Name,
+		CharmName:    hookContext.Metadata.Name,
 		Jobs: []*prometheus.Job{
 			{
 				Scheme:      "https",
@@ -171,7 +164,7 @@ func writePrometheus(hookContext *goops.HookContext) {
 		},
 	}
 
-	err = prometheusIntegration.Write()
+	err := prometheusIntegration.Write()
 	if err != nil {
 		hookContext.Commands.JujuLog(commands.Debug, "Could not write prometheus integration:", err.Error())
 		return
