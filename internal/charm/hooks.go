@@ -31,7 +31,6 @@ const (
 	PebbleSocketPath           = "/charm/containers/notary/pebble.socket"
 )
 
-// Main entry point in the charm. This function is called on every hook execution.
 func Configure() error {
 	isLeader, err := goops.IsLeader()
 	if err != nil {
