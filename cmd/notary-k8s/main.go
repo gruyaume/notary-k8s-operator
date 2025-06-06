@@ -13,6 +13,9 @@ func main() {
 		return
 	}
 
-	charm.HandleDefaultHook()
-	charm.SetStatus()
+	err := charm.HandleDefaultHook()
+	if err != nil {
+		goops.LogErrorf("Error handling default hook: %v", err)
+		return
+	}
 }
