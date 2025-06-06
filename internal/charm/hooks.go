@@ -28,10 +28,26 @@ const (
 	LoggingIntegrationName     = "logging"
 	TLSRequiresIntegrationName = "access-certificates"
 	TLSProvidesIntegrationName = "certificates"
+	PebbleSocketPath           = "/charm/containers/notary/pebble.socket"
 )
 
-func setPorts() error {
-	err := goops.SetPorts([]*goops.Port{
+func Configure() error {
+	isLeader, err := goops.IsLeader()
+	if err != nil {
+		return fmt.Errorf("could not check if unit is leader: %w", err)
+	}
+
+	if !isLeader {
+		_ = goops.SetUnitStatus(goops.StatusBlocked, "Unit is not leader")
+		return nil
+	}
+
+	err = writePrometheus()
+	if err != nil {
+		return fmt.Errorf("could not write prometheus integration: %w", err)
+	}
+
+	err = goops.SetPorts([]*goops.Port{
 		{
 			Port:     APIPort,
 			Protocol: "tcp",
@@ -41,112 +57,82 @@ func setPorts() error {
 		return fmt.Errorf("could not set ports: %w", err)
 	}
 
-	return nil
-}
-
-func HandleDefaultHook() {
-	err := ensureLeader()
+	pebble, err := client.New(&client.Config{Socket: PebbleSocketPath})
 	if err != nil {
-		return
-	}
-
-	writePrometheus()
-
-	err = setPorts()
-	if err != nil {
-		return
-	}
-
-	pebble, err := client.New(&client.Config{Socket: socketPath})
-	if err != nil {
-		goops.LogErrorf("Could not connect to pebble: %v", err)
-		return
+		_ = goops.SetUnitStatus(goops.StatusWaiting, "Could not connect to pebble")
+		return nil
 	}
 
 	err = syncConfig(pebble)
 	if err != nil {
-		return
+		return fmt.Errorf("could not sync config: %w", err)
 	}
 
 	changed, err := syncAccessCertificate(pebble)
 	if err != nil {
-		return
+		return fmt.Errorf("could not sync access certificate: %w", err)
 	}
 
 	err = syncPebbleService(pebble, changed)
 	if err != nil {
-		return
+		return fmt.Errorf("could not sync pebble service: %w", err)
 	}
 
 	configureLogging(pebble)
 
 	err = createAdminAccount(pebble)
 	if err != nil {
-		return
+		return fmt.Errorf("could not create admin account: %w", err)
 	}
 
-	notaryClient := getLoggedInNotaryClient(pebble)
+	notaryClient, err := getLoggedInNotaryClient(pebble)
+	if err != nil {
+		return fmt.Errorf("could not get logged in notary client: %w", err)
+	}
+
 	if notaryClient == nil {
-		return
+		return fmt.Errorf("notary client is nil, cannot proceed")
 	}
 
 	err = syncCertificatesProvides(notaryClient)
 	if err != nil {
-		return
-	}
-}
-
-func getLoggedInNotaryClient(pebble *client.Client) *notary.Client {
-	cert, err := getFileContent(pebble, CertPath)
-	if err != nil {
-		goops.LogErrorf("Certificate is not available: %v", err)
-		return nil
+		return fmt.Errorf("could not sync certificates provides: %w", err)
 	}
 
-	if cert == "" {
-		goops.LogErrorf("Certificate is empty")
-		return nil
-	}
-
-	notaryClient, err := NewNotaryClient(cert)
-	if err != nil {
-		goops.LogErrorf("Could not create notary client: %v", err)
-		return nil
-	}
-
-	err = loginNotaryClient(notaryClient)
-	if err != nil {
-		goops.LogErrorf("Could not login to Notary client: %v", err)
-		return nil
-	}
-
-	goops.LogInfof("Logged in to Notary client")
-
-	return notaryClient
-}
-
-func ensureLeader() error {
-	isLeader, err := goops.IsLeader()
-	if err != nil {
-		goops.LogWarningf("Could not check if unit is leader: %v", err)
-		return fmt.Errorf("could not check if unit is leader: %w", err)
-	}
-
-	if !isLeader {
-		goops.LogWarningf("Unit is not leader")
-		return fmt.Errorf("unit is not leader")
-	}
-
-	goops.LogInfof("Unit is leader")
+	_ = goops.SetUnitStatus(goops.StatusActive, "")
 
 	return nil
 }
 
-func writePrometheus() {
+func getLoggedInNotaryClient(pebble *client.Client) (*notary.Client, error) {
+	cert, err := getFileContent(pebble, CertPath)
+	if err != nil {
+		return nil, fmt.Errorf("certificate is not available: %w", err)
+	}
+
+	if cert == "" {
+		return nil, fmt.Errorf("certificate is empty")
+	}
+
+	notaryClient, err := NewNotaryClient(cert)
+	if err != nil {
+		return nil, fmt.Errorf("could not create notary client: %w", err)
+	}
+
+	err = loginNotaryClient(notaryClient)
+	if err != nil {
+		return nil, fmt.Errorf("could not login to notary client: %w", err)
+	}
+
+	goops.LogInfof("Logged in to Notary client")
+
+	return notaryClient, nil
+}
+
+func writePrometheus() error {
 	meta, err := goops.ReadMetadata()
 	if err != nil {
-		goops.LogErrorf("Could not read metadata: %v", err)
-		return
+		return fmt.Errorf("could not read metadata: %w", err)
 	}
 
 	prometheusIntegration := &prometheus.Integration{
@@ -168,11 +154,13 @@ func writePrometheus() {
 
 	err = prometheusIntegration.Write()
 	if err != nil {
-		goops.LogDebugf("Could not write prometheus integration: %v", err)
-		return
+		goops.LogDebugf("Could not write prometheus integration, this may happen if relation is not created: %v", err)
+		return nil
 	}
 
 	goops.LogInfof("Prometheus integration written for %s", prometheusIntegration.RelationName)
+
+	return nil
 }
 
 func configureLogging(pebble *client.Client) {
@@ -192,13 +180,11 @@ func configureLogging(pebble *client.Client) {
 func syncConfig(pebble *client.Client) error {
 	expectedConfig, err := getExpectedConfig()
 	if err != nil {
-		goops.LogErrorf("Could not get expected config: %v", err)
 		return fmt.Errorf("could not get expected config: %w", err)
 	}
 
 	err = pushFile(pebble, string(expectedConfig), "/etc/notary/config/notary.yaml")
 	if err != nil {
-		goops.LogErrorf("Could not push config file: %v", err)
 		return fmt.Errorf("could not push config file: %w", err)
 	}
 
@@ -210,14 +196,14 @@ func syncConfig(pebble *client.Client) error {
 func syncPebbleService(pebble *client.Client, restart bool) error {
 	err := addPebbleLayer(pebble)
 	if err != nil {
-		goops.LogErrorf("Could not add pebble layer: %v", err)
 		return fmt.Errorf("could not add pebble layer: %w", err)
 	}
 
 	if restart {
-		err := restartPebbleService(pebble)
+		_, err := pebble.Restart(&client.ServiceOptions{
+			Names: []string{"notary"},
+		})
 		if err != nil {
-			goops.LogErrorf("Could not restart pebble service: %v", err)
 			return fmt.Errorf("could not restart pebble service: %w", err)
 		}
 
@@ -226,9 +212,10 @@ func syncPebbleService(pebble *client.Client, restart bool) error {
 
 	goops.LogInfof("Pebble layer added")
 
-	err = startPebbleService(pebble)
+	_, err = pebble.Start(&client.ServiceOptions{
+		Names: []string{"notary"},
+	})
 	if err != nil {
-		goops.LogErrorf("Could not start pebble service: %v", err)
 		return fmt.Errorf("could not start pebble service: %w", err)
 	}
 
@@ -267,7 +254,6 @@ func syncCertificatesProvides(notaryClient *notary.Client) error {
 
 			err := notaryClient.RequestCertificate(&notary.CreateCertificateRequestOptions{CSR: csr})
 			if err != nil {
-				goops.LogErrorf("Could not request certificate for relation %s: %v", dr.RelationID, err)
 				return fmt.Errorf("could not request certificate: %w", err)
 			}
 
@@ -284,14 +270,12 @@ func syncCertificatesProvides(notaryClient *notary.Client) error {
 			}
 
 			if err := sendCertificate(provider, dr.RelationID, nr); err != nil {
-				goops.LogErrorf("Could not set relation certificate for relation %s: %v", dr.RelationID, err)
 				return fmt.Errorf("could not set relation certificate: %w", err)
 			}
 
 			goops.LogInfof("Relation certificate set for relation %s", dr.RelationID)
 
 		default: // Multiple matching Certificate Requests in Notary
-			goops.LogErrorf("Multiple notary certificate requests found for databag certificate request %s", dr.RelationID)
 			return fmt.Errorf("multiple notary certificate requests found for databag certificate request")
 		}
 	}
@@ -503,13 +487,11 @@ func syncAccessCertificate(pebble *client.Client) (bool, error) {
 
 		changed, err = syncSelfSignedCertificate(pebble)
 		if err != nil {
-			goops.LogErrorf("Could not sync self signed certificate: %v", err)
 			return false, fmt.Errorf("could not sync self signed certificate: %v", err)
 		}
 	} else {
 		changed, err = syncTlsProviderCertificate(pebble)
 		if err != nil {
-			goops.LogErrorf("Could not sync TLS provider certificate: %v", err)
 			return false, fmt.Errorf("could not sync tls provider certificate: %v", err)
 		}
 	}
@@ -519,37 +501,23 @@ func syncAccessCertificate(pebble *client.Client) (bool, error) {
 	return changed, nil
 }
 
-func SetStatus() {
-	err := goops.SetUnitStatus(goops.StatusActive, "")
-	if err != nil {
-		goops.LogErrorf("Could not set status: %v", err)
-		return
-	}
-
-	goops.LogInfof("Status set to active")
-}
-
 func createAdminAccount(pebble *client.Client) error {
 	cert, err := getFileContent(pebble, CertPath)
 	if err != nil {
-		goops.LogErrorf("Certificate is not available: %v", err)
 		return fmt.Errorf("certificate is not available: %w", err)
 	}
 
 	if cert == "" {
-		goops.LogErrorf("Certificate is empty")
 		return fmt.Errorf("certificate is empty")
 	}
 
 	notaryClient, err := NewNotaryClient(cert)
 	if err != nil {
-		goops.LogErrorf("Could not create notary client: %v", err)
 		return fmt.Errorf("could not create notary client: %w", err)
 	}
 
 	status, err := notaryClient.GetStatus()
 	if err != nil {
-		goops.LogErrorf("Could not get status: %v", err)
 		return fmt.Errorf("could not get status: %w", err)
 	}
 
@@ -559,12 +527,10 @@ func createAdminAccount(pebble *client.Client) error {
 
 	password, err := getOrGenerateNotaryPassword()
 	if err != nil {
-		goops.LogErrorf("Could not get or generate password: %v", err)
 		return fmt.Errorf("could not get or generate password: %w", err)
 	}
 
 	if password == "" {
-		goops.LogErrorf("Password is empty")
 		return fmt.Errorf("could not get password from secret")
 	}
 
@@ -573,7 +539,6 @@ func createAdminAccount(pebble *client.Client) error {
 		Password: password,
 	})
 	if err != nil {
-		goops.LogErrorf("Could not create account: %v", err)
 		return fmt.Errorf("could not create account: %w", err)
 	}
 

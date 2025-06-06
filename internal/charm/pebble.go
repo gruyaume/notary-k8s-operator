@@ -9,23 +9,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	socketPath = "/charm/containers/notary/pebble.socket"
-)
-
-type ServiceConfig struct {
-	Override string `yaml:"override"`
-	Summary  string `yaml:"summary"`
-	Command  string `yaml:"command"`
-	Startup  string `yaml:"startup"`
-}
-
-type PebbleLayer struct {
-	Summary     string                   `yaml:"summary"`
-	Description string                   `yaml:"description"`
-	Services    map[string]ServiceConfig `yaml:"services"`
-}
-
 func pushFile(pebbleClient *client.Client, content string, path string) error {
 	_, err := pebbleClient.SysInfo()
 	if err != nil {
@@ -59,6 +42,19 @@ func getFileContent(pebbleClient *client.Client, path string) (string, error) {
 	return target.String(), nil
 }
 
+type ServiceConfig struct {
+	Override string `yaml:"override"`
+	Summary  string `yaml:"summary"`
+	Command  string `yaml:"command"`
+	Startup  string `yaml:"startup"`
+}
+
+type PebbleLayer struct {
+	Summary     string                   `yaml:"summary"`
+	Description string                   `yaml:"description"`
+	Services    map[string]ServiceConfig `yaml:"services"`
+}
+
 func addPebbleLayer(pebbleClient *client.Client) error {
 	layerData, err := yaml.Marshal(PebbleLayer{
 		Summary:     "Notary layer",
@@ -83,28 +79,6 @@ func addPebbleLayer(pebbleClient *client.Client) error {
 	})
 	if err != nil {
 		return fmt.Errorf("could not add pebble layer: %w", err)
-	}
-
-	return nil
-}
-
-func startPebbleService(pebbleClient *client.Client) error {
-	_, err := pebbleClient.Start(&client.ServiceOptions{
-		Names: []string{"notary"},
-	})
-	if err != nil {
-		return fmt.Errorf("could not start pebble service: %w", err)
-	}
-
-	return nil
-}
-
-func restartPebbleService(pebbleClient *client.Client) error {
-	_, err := pebbleClient.Restart(&client.ServiceOptions{
-		Names: []string{"notary"},
-	})
-	if err != nil {
-		return fmt.Errorf("could not restart pebble service: %w", err)
 	}
 
 	return nil

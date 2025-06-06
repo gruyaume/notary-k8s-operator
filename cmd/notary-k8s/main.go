@@ -6,13 +6,9 @@ import (
 )
 
 func main() {
-	env := goops.ReadEnv()
-
-	if env.HookName == "" {
-		goops.LogErrorf("No hook name found in environment")
+	err := charm.Configure()
+	if err != nil {
+		goops.LogErrorf("Error handling default hook: %v", err)
 		return
 	}
-
-	charm.HandleDefaultHook()
-	charm.SetStatus()
 }
