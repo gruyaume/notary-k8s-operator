@@ -14,7 +14,6 @@ import (
 	"github.com/gruyaume/charm-libraries/logging"
 	"github.com/gruyaume/charm-libraries/prometheus"
 	"github.com/gruyaume/goops"
-	"github.com/gruyaume/goops/commands"
 	"github.com/gruyaume/notary-k8s-operator/internal/notary"
 )
 
@@ -31,13 +30,11 @@ const (
 	TLSProvidesIntegrationName = "certificates"
 )
 
-func setPorts(hookContext *goops.HookContext) error {
-	err := hookContext.Commands.SetPorts(&commands.SetPortsOptions{
-		Ports: []*commands.Port{
-			{
-				Port:     APIPort,
-				Protocol: "tcp",
-			},
+func setPorts() error {
+	err := goops.SetPorts([]*goops.Port{
+		{
+			Port:     APIPort,
+			Protocol: "tcp",
 		},
 	})
 	if err != nil {
@@ -47,109 +44,114 @@ func setPorts(hookContext *goops.HookContext) error {
 	return nil
 }
 
-func HandleDefaultHook(hookContext *goops.HookContext) {
-	err := ensureLeader(hookContext)
+func HandleDefaultHook() {
+	err := ensureLeader()
 	if err != nil {
 		return
 	}
 
-	writePrometheus(hookContext)
+	writePrometheus()
 
-	err = setPorts(hookContext)
+	err = setPorts()
 	if err != nil {
 		return
 	}
 
 	pebble, err := client.New(&client.Config{Socket: socketPath})
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not connect to pebble:", err.Error())
+		goops.LogErrorf("Could not connect to pebble: %v", err)
 		return
 	}
 
-	err = syncConfig(hookContext, pebble)
+	err = syncConfig(pebble)
 	if err != nil {
 		return
 	}
 
-	changed, err := syncAccessCertificate(hookContext, pebble)
+	changed, err := syncAccessCertificate(pebble)
 	if err != nil {
 		return
 	}
 
-	err = syncPebbleService(hookContext, pebble, changed)
+	err = syncPebbleService(pebble, changed)
 	if err != nil {
 		return
 	}
 
-	configureLogging(hookContext, pebble)
+	configureLogging(pebble)
 
-	err = createAdminAccount(hookContext, pebble)
+	err = createAdminAccount(pebble)
 	if err != nil {
 		return
 	}
 
-	notaryClient := getLoggedInNotaryClient(hookContext, pebble)
+	notaryClient := getLoggedInNotaryClient(pebble)
 	if notaryClient == nil {
 		return
 	}
 
-	err = syncCertificatesProvides(hookContext, notaryClient)
+	err = syncCertificatesProvides(notaryClient)
 	if err != nil {
 		return
 	}
 }
 
-func getLoggedInNotaryClient(hookContext *goops.HookContext, pebble *client.Client) *notary.Client {
+func getLoggedInNotaryClient(pebble *client.Client) *notary.Client {
 	cert, err := getFileContent(pebble, CertPath)
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Certificate is not available", err.Error())
+		goops.LogErrorf("Certificate is not available: %v", err)
 		return nil
 	}
 
 	if cert == "" {
-		hookContext.Commands.JujuLog(commands.Error, "Certificate is empty")
+		goops.LogErrorf("Certificate is empty")
 		return nil
 	}
 
 	notaryClient, err := NewNotaryClient(cert)
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not create notary client:", err.Error())
+		goops.LogErrorf("Could not create notary client: %v", err)
 		return nil
 	}
 
-	err = loginNotaryClient(hookContext, notaryClient)
+	err = loginNotaryClient(notaryClient)
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not login to Notary client", err.Error())
+		goops.LogErrorf("Could not login to Notary client: %v", err)
 		return nil
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Logged in to notary")
+	goops.LogInfof("Logged in to Notary client")
 
 	return notaryClient
 }
 
-func ensureLeader(hookContext *goops.HookContext) error {
-	isLeader, err := hookContext.Commands.IsLeader()
+func ensureLeader() error {
+	isLeader, err := goops.IsLeader()
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Warning, "Could not check if unit is leader:", err.Error())
+		goops.LogWarningf("Could not check if unit is leader: %v", err)
 		return fmt.Errorf("could not check if unit is leader: %w", err)
 	}
 
 	if !isLeader {
-		hookContext.Commands.JujuLog(commands.Warning, "Unit is not leader")
+		goops.LogWarningf("Unit is not leader")
 		return fmt.Errorf("unit is not leader")
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Unit is leader")
+	goops.LogInfof("Unit is leader")
 
 	return nil
 }
 
-func writePrometheus(hookContext *goops.HookContext) {
+func writePrometheus() {
+	meta, err := goops.ReadMetadata()
+	if err != nil {
+		goops.LogErrorf("Could not read metadata: %v", err)
+		return
+	}
+
 	prometheusIntegration := &prometheus.Integration{
-		HookContext:  hookContext,
 		RelationName: MetricsIntegrationName,
-		CharmName:    hookContext.Metadata.Name,
+		CharmName:    meta.Name,
 		Jobs: []*prometheus.Job{
 			{
 				Scheme:      "https",
@@ -157,25 +159,24 @@ func writePrometheus(hookContext *goops.HookContext) {
 				MetricsPath: "/metrics",
 				StaticConfigs: []prometheus.StaticConfig{
 					{
-						Targets: []string{getHostname(hookContext)},
+						Targets: []string{getHostname()},
 					},
 				},
 			},
 		},
 	}
 
-	err := prometheusIntegration.Write()
+	err = prometheusIntegration.Write()
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Debug, "Could not write prometheus integration:", err.Error())
+		goops.LogDebugf("Could not write prometheus integration: %v", err)
 		return
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Prometheus integration written")
+	goops.LogInfof("Prometheus integration written for %s", prometheusIntegration.RelationName)
 }
 
-func configureLogging(hookContext *goops.HookContext, pebble *client.Client) {
+func configureLogging(pebble *client.Client) {
 	i := &logging.Integration{
-		HookContext:   hookContext,
 		PebbleClient:  pebble,
 		RelationName:  "logging",
 		ContainerName: "notary",
@@ -183,67 +184,66 @@ func configureLogging(hookContext *goops.HookContext, pebble *client.Client) {
 
 	err := i.EnableEndpoints()
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Debug, "Could not enable logging endpoints:", err.Error())
+		goops.LogDebugf("Could not enable logging endpoints: %v", err)
 		return
 	}
 }
 
-func syncConfig(hookContext *goops.HookContext, pebble *client.Client) error {
+func syncConfig(pebble *client.Client) error {
 	expectedConfig, err := getExpectedConfig()
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not get expected config:", err.Error())
+		goops.LogErrorf("Could not get expected config: %v", err)
 		return fmt.Errorf("could not get expected config: %w", err)
 	}
 
 	err = pushFile(pebble, string(expectedConfig), "/etc/notary/config/notary.yaml")
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not push config file:", err.Error())
+		goops.LogErrorf("Could not push config file: %v", err)
 		return fmt.Errorf("could not push config file: %w", err)
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Config file pushed")
+	goops.LogInfof("Config file pushed to %s", ConfigPath)
 
 	return nil
 }
 
-func syncPebbleService(hookContext *goops.HookContext, pebble *client.Client, restart bool) error {
+func syncPebbleService(pebble *client.Client, restart bool) error {
 	err := addPebbleLayer(pebble)
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not add pebble layer:", err.Error())
+		goops.LogErrorf("Could not add pebble layer: %v", err)
 		return fmt.Errorf("could not add pebble layer: %w", err)
 	}
 
 	if restart {
 		err := restartPebbleService(pebble)
 		if err != nil {
-			hookContext.Commands.JujuLog(commands.Error, "Could not restart pebble service:", err.Error())
+			goops.LogErrorf("Could not restart pebble service: %v", err)
 			return fmt.Errorf("could not restart pebble service: %w", err)
 		}
 
-		hookContext.Commands.JujuLog(commands.Info, "Pebble service restarted")
+		goops.LogInfof("Pebble service restarted")
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Pebble layer added")
+	goops.LogInfof("Pebble layer added")
 
 	err = startPebbleService(pebble)
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not start pebble service:", err.Error())
+		goops.LogErrorf("Could not start pebble service: %v", err)
 		return fmt.Errorf("could not start pebble service: %w", err)
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Pebble service started")
+	goops.LogInfof("Pebble service started")
 
 	return nil
 }
 
 // syncCertificatesProvides provides TLS certificates to TLS requirers.
-func syncCertificatesProvides(hookContext *goops.HookContext, notaryClient *notary.Client) error {
-	if !integrationCreated(hookContext, TLSProvidesIntegrationName) {
+func syncCertificatesProvides(notaryClient *notary.Client) error {
+	if !integrationCreated(TLSProvidesIntegrationName) {
 		return nil
 	}
 
 	provider := certificates.IntegrationProvider{
-		HookContext:  hookContext,
 		RelationName: TLSProvidesIntegrationName,
 	}
 
@@ -263,20 +263,19 @@ func syncCertificatesProvides(hookContext *goops.HookContext, notaryClient *nota
 
 		switch len(matches) {
 		case 0: // No matching Certificate Request in Notary
-			hookContext.Commands.JujuLog(commands.Info, "No matching notary certificate request found; sending new request")
+			goops.LogInfof("No matching notary certificate request found for databag certificate request %s", dr.RelationID)
 
 			err := notaryClient.RequestCertificate(&notary.CreateCertificateRequestOptions{CSR: csr})
 			if err != nil {
-				hookContext.Commands.JujuLog(commands.Error, "Could not request certificate:", err.Error())
+				goops.LogErrorf("Could not request certificate for relation %s: %v", dr.RelationID, err)
 				return fmt.Errorf("could not request certificate: %w", err)
 			}
 
-			hookContext.Commands.JujuLog(commands.Info, "Certificate request sent to notary")
-
+			goops.LogInfof("Certificate request sent to notary for relation %s", dr.RelationID)
 		case 1: // One matching Certificate Request in Notary
 			nr := matches[0]
 			if nr.Status != "Active" {
-				hookContext.Commands.JujuLog(commands.Debug, "Notary certificate request is not active")
+				goops.LogDebugf("Notary certificate request for relation %s is not active, skipping", dr.RelationID)
 				continue
 			}
 
@@ -285,16 +284,14 @@ func syncCertificatesProvides(hookContext *goops.HookContext, notaryClient *nota
 			}
 
 			if err := sendCertificate(provider, dr.RelationID, nr); err != nil {
-				hookContext.Commands.JujuLog(commands.Error,
-					"Could not set relation certificate:", err.Error())
+				goops.LogErrorf("Could not set relation certificate for relation %s: %v", dr.RelationID, err)
 				return fmt.Errorf("could not set relation certificate: %w", err)
 			}
 
-			hookContext.Commands.JujuLog(commands.Info, "Relation certificate set")
+			goops.LogInfof("Relation certificate set for relation %s", dr.RelationID)
 
 		default: // Multiple matching Certificate Requests in Notary
-			hookContext.Commands.JujuLog(commands.Error,
-				"Multiple notary certificate requests found for databag certificate request")
+			goops.LogErrorf("Multiple notary certificate requests found for databag certificate request %s", dr.RelationID)
 			return fmt.Errorf("multiple notary certificate requests found for databag certificate request")
 		}
 	}
@@ -346,11 +343,8 @@ func NewNotaryClient(certPEM string) (*notary.Client, error) {
 	return notary.New(cfg)
 }
 
-func loginNotaryClient(hookContext *goops.HookContext, client *notary.Client) error {
-	secret, err := hookContext.Commands.SecretGet(&commands.SecretGetOptions{
-		Refresh: true,
-		Label:   NotaryLoginSecretLabel,
-	})
+func loginNotaryClient(client *notary.Client) error {
+	secret, err := goops.GetSecretByLabel(NotaryLoginSecretLabel, false, true)
 	if err != nil {
 		return fmt.Errorf("could not get secret: %w", err)
 	}
@@ -375,10 +369,8 @@ func loginNotaryClient(hookContext *goops.HookContext, client *notary.Client) er
 	return nil
 }
 
-func integrationCreated(hookContext *goops.HookContext, name string) bool {
-	relationIDs, err := hookContext.Commands.RelationIDs(&commands.RelationIDsOptions{
-		Name: name,
-	})
+func integrationCreated(name string) bool {
+	relationIDs, err := goops.GetRelationIDs(name)
 	if err != nil {
 		return false
 	}
@@ -390,11 +382,11 @@ func integrationCreated(hookContext *goops.HookContext, name string) bool {
 	return true
 }
 
-func syncSelfSignedCertificate(hookContext *goops.HookContext, pebble *client.Client) (bool, error) {
+func syncSelfSignedCertificate(pebble *client.Client) (bool, error) {
 	certContent, _ := getFileContent(pebble, CertPath)
 
 	if certContent != "" {
-		hookContext.Commands.JujuLog(commands.Info, "Certificate already exists, skipping generation")
+		goops.LogInfof("Certificate already exists, skipping generation")
 		return false, nil
 	}
 
@@ -407,35 +399,34 @@ func syncSelfSignedCertificate(hookContext *goops.HookContext, pebble *client.Cl
 		return false, fmt.Errorf("could not generate certificate: %w", err)
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Certificate generated")
+	goops.LogInfof("Certificate generated")
 
 	err = pushFile(pebble, cert, "/etc/notary/config/cert.pem")
 	if err != nil {
 		return false, fmt.Errorf("could not push certificate: %w", err)
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Certificate pushed")
+	goops.LogInfof("Certificate pushed")
 
 	err = pushFile(pebble, key, "/etc/notary/config/key.pem")
 	if err != nil {
 		return false, fmt.Errorf("could not push key: %w", err)
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Key pushed")
+	goops.LogInfof("Key pushed")
 
 	return true, nil
 }
 
 // syncTlsProviderCertificate makes a certificate request to the TLS provider
 // and pushes the certificate and key to the pebble client.
-func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.Client) (bool, error) {
+func syncTlsProviderCertificate(pebble *client.Client) (bool, error) {
 	changed := false
 	tlsRequirerIntegration := certificates.IntegrationRequirer{
-		HookContext:  hookContext,
 		RelationName: TLSRequiresIntegrationName,
 		CertificateRequest: certificates.CertificateRequestAttributes{
-			CommonName:          getHostname(hookContext),
-			SansDNS:             []string{getHostname(hookContext)},
+			CommonName:          getHostname(),
+			SansDNS:             []string{getHostname()},
 			SansIP:              []string{"127.0.0.1"},
 			CountryName:         "CA",
 			StateOrProvinceName: "QC",
@@ -448,7 +439,7 @@ func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.C
 		return changed, fmt.Errorf("could not request certificate: %w", err)
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Certificate requested")
+	goops.LogInfof("Certificate requested")
 
 	providerCert, err := tlsRequirerIntegration.GetProviderCertificate()
 	if err != nil {
@@ -463,7 +454,7 @@ func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.C
 		return changed, fmt.Errorf("certificate is empty")
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Certificate received")
+	goops.LogInfof("Certificate received")
 
 	privateKey, err := tlsRequirerIntegration.GetPrivateKey()
 	if err != nil {
@@ -473,28 +464,28 @@ func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.C
 	existingPrivateKey, _ := getFileContent(pebble, KeyPath)
 
 	if existingPrivateKey != privateKey {
-		hookContext.Commands.JujuLog(commands.Warning, "Private key is different")
+		goops.LogWarningf("Private key is different")
 
 		err = pushFile(pebble, privateKey, KeyPath)
 		if err != nil {
 			return changed, fmt.Errorf("could not push key: %w", err)
 		}
 
-		hookContext.Commands.JujuLog(commands.Info, "Key pushed")
+		goops.LogInfof("Key pushed")
 
 		changed = true
 	}
 
 	existingCertificate, _ := getFileContent(pebble, CertPath)
 	if existingCertificate != providerCert[0].Certificate {
-		hookContext.Commands.JujuLog(commands.Warning, "Certificate is different")
+		goops.LogWarningf("Certificate is different, existing: %s, new: %s", existingCertificate, providerCert[0].Certificate)
 
 		err = pushFile(pebble, providerCert[0].Certificate, CertPath)
 		if err != nil {
 			return changed, fmt.Errorf("could not push certificate: %w", err)
 		}
 
-		hookContext.Commands.JujuLog(commands.Info, "Certificate pushed")
+		goops.LogInfof("Certificate pushed")
 
 		changed = true
 	}
@@ -502,72 +493,63 @@ func syncTlsProviderCertificate(hookContext *goops.HookContext, pebble *client.C
 	return changed, nil
 }
 
-func syncAccessCertificate(hookContext *goops.HookContext, pebble *client.Client) (bool, error) {
+func syncAccessCertificate(pebble *client.Client) (bool, error) {
 	var changed bool
 
 	var err error
 
-	if !integrationCreated(hookContext, TLSRequiresIntegrationName) {
-		hookContext.Commands.JujuLog(commands.Info, "`access-certificates` integration not created")
+	if !integrationCreated(TLSRequiresIntegrationName) {
+		goops.LogInfof("`%s` integration not created, using self-signed certificate", TLSRequiresIntegrationName)
 
-		changed, err = syncSelfSignedCertificate(hookContext, pebble)
+		changed, err = syncSelfSignedCertificate(pebble)
 		if err != nil {
-			hookContext.Commands.JujuLog(commands.Error, "Could not sync self signed certificate:", err.Error())
+			goops.LogErrorf("Could not sync self signed certificate: %v", err)
 			return false, fmt.Errorf("could not sync self signed certificate: %v", err)
 		}
 	} else {
-		changed, err = syncTlsProviderCertificate(hookContext, pebble)
+		changed, err = syncTlsProviderCertificate(pebble)
 		if err != nil {
-			hookContext.Commands.JujuLog(commands.Error, "Could not sync tls provider certificate:", err.Error())
+			goops.LogErrorf("Could not sync TLS provider certificate: %v", err)
 			return false, fmt.Errorf("could not sync tls provider certificate: %v", err)
 		}
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Synced TLS certificate")
+	goops.LogInfof("Synced TLS certificate, changed: %v", changed)
 
 	return changed, nil
 }
 
-func SetStatus(hookContext *goops.HookContext) {
-	status := commands.StatusActive
-
-	message := ""
-
-	statusSetOpts := &commands.StatusSetOptions{
-		Name:    status,
-		Message: message,
-	}
-
-	err := hookContext.Commands.StatusSet(statusSetOpts)
+func SetStatus() {
+	err := goops.SetUnitStatus(goops.StatusActive, "")
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not set status:", err.Error())
+		goops.LogErrorf("Could not set status: %v", err)
 		return
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Status set to active")
+	goops.LogInfof("Status set to active")
 }
 
-func createAdminAccount(hookContext *goops.HookContext, pebble *client.Client) error {
+func createAdminAccount(pebble *client.Client) error {
 	cert, err := getFileContent(pebble, CertPath)
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Certificate is not available", err.Error())
+		goops.LogErrorf("Certificate is not available: %v", err)
 		return fmt.Errorf("certificate is not available: %w", err)
 	}
 
 	if cert == "" {
-		hookContext.Commands.JujuLog(commands.Error, "Certificate is empty")
+		goops.LogErrorf("Certificate is empty")
 		return fmt.Errorf("certificate is empty")
 	}
 
 	notaryClient, err := NewNotaryClient(cert)
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not create notary client:", err.Error())
+		goops.LogErrorf("Could not create notary client: %v", err)
 		return fmt.Errorf("could not create notary client: %w", err)
 	}
 
 	status, err := notaryClient.GetStatus()
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not get status:", err.Error())
+		goops.LogErrorf("Could not get status: %v", err)
 		return fmt.Errorf("could not get status: %w", err)
 	}
 
@@ -575,14 +557,14 @@ func createAdminAccount(hookContext *goops.HookContext, pebble *client.Client) e
 		return nil
 	}
 
-	password, err := getOrGenerateNotaryPassword(hookContext)
+	password, err := getOrGenerateNotaryPassword()
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not get or generate password:", err.Error())
+		goops.LogErrorf("Could not get or generate password: %v", err)
 		return fmt.Errorf("could not get or generate password: %w", err)
 	}
 
 	if password == "" {
-		hookContext.Commands.JujuLog(commands.Error, "Password is empty")
+		goops.LogErrorf("Password is empty")
 		return fmt.Errorf("could not get password from secret")
 	}
 
@@ -591,20 +573,17 @@ func createAdminAccount(hookContext *goops.HookContext, pebble *client.Client) e
 		Password: password,
 	})
 	if err != nil {
-		hookContext.Commands.JujuLog(commands.Error, "Could not create account:", err.Error())
+		goops.LogErrorf("Could not create account: %v", err)
 		return fmt.Errorf("could not create account: %w", err)
 	}
 
-	hookContext.Commands.JujuLog(commands.Info, "Account created")
+	goops.LogInfof("Account created for username: %s", CharmAccountUsername)
 
 	return nil
 }
 
-func getOrGenerateNotaryPassword(hookContext *goops.HookContext) (string, error) {
-	secret, _ := hookContext.Commands.SecretGet(&commands.SecretGetOptions{
-		Refresh: true,
-		Label:   NotaryLoginSecretLabel,
-	})
+func getOrGenerateNotaryPassword() (string, error) {
+	secret, _ := goops.GetSecretByLabel(NotaryLoginSecretLabel, false, true)
 
 	if secret != nil {
 		return secret["password"], nil
@@ -615,7 +594,7 @@ func getOrGenerateNotaryPassword(hookContext *goops.HookContext) (string, error)
 		return "", fmt.Errorf("could not generate random password: %w", err)
 	}
 
-	secretAddOpts := &commands.SecretAddOptions{
+	secretAddOpts := &goops.AddSecretOptions{
 		Label: NotaryLoginSecretLabel,
 		Content: map[string]string{
 			"password": password,
@@ -623,7 +602,7 @@ func getOrGenerateNotaryPassword(hookContext *goops.HookContext) (string, error)
 		},
 	}
 
-	_, err = hookContext.Commands.SecretAdd(secretAddOpts)
+	_, err = goops.AddSecret(secretAddOpts)
 	if err != nil {
 		return "", fmt.Errorf("could not add secret: %w", err)
 	}
@@ -650,12 +629,12 @@ func generateRandomPassword() (string, error) {
 	return string(b), nil
 }
 
-func getHostname(hookContext *goops.HookContext) string {
-	modelName := hookContext.Environment.JujuModelName()
-	unitName := hookContext.Environment.JujuUnitName()
-	appName := strings.Split(unitName, "/")[0]
-	unitNumber := strings.Split(unitName, "/")[1]
-	unitHostname := fmt.Sprintf("%s-%s.%s-endpoints.%s.svc.cluster.local:%d", appName, unitNumber, appName, modelName, APIPort)
+func getHostname() string {
+	env := goops.ReadEnv()
+
+	appName := strings.Split(env.UnitName, "/")[0]
+	unitNumber := strings.Split(env.UnitName, "/")[1]
+	unitHostname := fmt.Sprintf("%s-%s.%s-endpoints.%s.svc.cluster.local:%d", appName, unitNumber, appName, env.ModelName, APIPort)
 
 	return unitHostname
 }

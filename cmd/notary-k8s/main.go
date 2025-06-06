@@ -2,19 +2,17 @@ package main
 
 import (
 	"github.com/gruyaume/goops"
-	"github.com/gruyaume/goops/commands"
 	"github.com/gruyaume/notary-k8s-operator/internal/charm"
 )
 
 func main() {
-	hc := goops.NewHookContext()
-	hook := hc.Environment.JujuHookName()
+	env := goops.ReadEnv()
 
-	if hook == "" {
-		hc.Commands.JujuLog(commands.Error, "No hook name found in environment")
+	if env.HookName == "" {
+		goops.LogErrorf("No hook name found in environment")
 		return
 	}
 
-	charm.HandleDefaultHook(hc)
-	charm.SetStatus(hc)
+	charm.HandleDefaultHook()
+	charm.SetStatus()
 }
