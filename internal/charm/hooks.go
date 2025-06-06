@@ -33,7 +33,8 @@ const (
 	PebbleSocketPath           = "/charm/containers/notary/pebble.socket"
 )
 
-func HandleDefaultHook() error {
+// Main entry point in the charm. This function is called on every hook execution.
+func Configure() error {
 	isLeader, err := goops.IsLeader()
 	if err != nil {
 		return fmt.Errorf("could not check if unit is leader: %w", err)
