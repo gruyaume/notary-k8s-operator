@@ -4,10 +4,10 @@ go 1.24.0
 
 require (
 	github.com/canonical/pebble v1.22.2
-	github.com/gruyaume/charm-libraries/certificates v0.0.0-20250609200116-16a5979ef15e
-	github.com/gruyaume/charm-libraries/logging v0.0.0-20250609200116-16a5979ef15e
-	github.com/gruyaume/charm-libraries/prometheus v0.0.0-20250609200116-16a5979ef15e
-	github.com/gruyaume/goops v0.0.18
+	github.com/gruyaume/charm-libraries/certificates v0.0.0-20250616201711-3306286fd3a6
+	github.com/gruyaume/charm-libraries/logging v0.0.0-20250616201711-3306286fd3a6
+	github.com/gruyaume/charm-libraries/prometheus v0.0.0-20250616201711-3306286fd3a6
+	github.com/gruyaume/goops v0.0.19
 	gopkg.in/yaml.v3 v3.0.1
 )
 
