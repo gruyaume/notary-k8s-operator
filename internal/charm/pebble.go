@@ -6,10 +6,11 @@ import (
 	"strings"
 
 	"github.com/canonical/pebble/client"
+	"github.com/gruyaume/goops"
 	"gopkg.in/yaml.v3"
 )
 
-func pushFile(pebbleClient *client.Client, content string, path string) error {
+func pushFile(pebbleClient goops.PebbleClient, content string, path string) error {
 	_, err := pebbleClient.SysInfo()
 	if err != nil {
 		return fmt.Errorf("could not connect to pebble: %w", err)
@@ -28,7 +29,7 @@ func pushFile(pebbleClient *client.Client, content string, path string) error {
 	return nil
 }
 
-func getFileContent(pebbleClient *client.Client, path string) (string, error) {
+func getFileContent(pebbleClient goops.PebbleClient, path string) (string, error) {
 	target := &bytes.Buffer{}
 
 	err := pebbleClient.Pull(&client.PullOptions{
@@ -55,7 +56,7 @@ type PebbleLayer struct {
 	Services    map[string]ServiceConfig `yaml:"services"`
 }
 
-func addPebbleLayer(pebbleClient *client.Client) error {
+func addPebbleLayer(pebbleClient goops.PebbleClient) error {
 	layerData, err := yaml.Marshal(PebbleLayer{
 		Summary:     "Notary layer",
 		Description: "pebble config layer for Notary",
