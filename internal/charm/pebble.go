@@ -55,6 +55,62 @@ type PebbleLayer struct {
 	Services    map[string]ServiceConfig `yaml:"services"`
 }
 
+type Check struct {
+	Override  string `yaml:"override"`
+	Level     string `yaml:"level"`
+	Startup   string `yaml:"startup"`
+	Period    string `yaml:"period"`
+	Timeout   string `yaml:"timeout"`
+	Threshold string `yaml:"threshold"`
+	HTTP      string `yaml:"http"`
+	TCP       string `yaml:"tcp"`
+	Exec      string `yaml:"exec"`
+}
+
+type LogTarget struct {
+	Override string            `yaml:"override"`
+	Type     string            `yaml:"type"`
+	Location string            `yaml:"location"`
+	Services []string          `yaml:"services"`
+	Labels   map[string]string `yaml:"labels"`
+}
+
+type PebblePlan struct {
+	Services   map[string]ServiceConfig `yaml:"services"`
+	Checks     map[string]Check         `yaml:"checks"`
+	LogTargets map[string]LogTarget     `yaml:"log-targets"`
+}
+
+func pebbleLayerCreated(pebbleClient *client.Client) bool {
+	_, err := pebbleClient.SysInfo()
+	if err != nil {
+		return false
+	}
+
+	dataBytes, err := pebbleClient.PlanBytes(nil)
+	if err != nil {
+		return false
+	}
+
+	var plan PebblePlan
+
+	err = yaml.Unmarshal(dataBytes, &plan)
+	if err != nil {
+		return false
+	}
+
+	service, exists := plan.Services["notary"]
+	if !exists {
+		return false
+	}
+
+	if service.Command != "notary --config "+ConfigPath {
+		return false
+	}
+
+	return true
+}
+
 func addPebbleLayer(pebbleClient *client.Client) error {
 	layerData, err := yaml.Marshal(PebbleLayer{
 		Summary:     "Notary layer",

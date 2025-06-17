@@ -194,9 +194,15 @@ func syncConfig(pebble *client.Client) error {
 }
 
 func syncPebbleService(pebble *client.Client, restart bool) error {
-	err := addPebbleLayer(pebble)
-	if err != nil {
-		return fmt.Errorf("could not add pebble layer: %w", err)
+	if !pebbleLayerCreated(pebble) {
+		goops.LogInfof("Pebble layer not created")
+
+		err := addPebbleLayer(pebble)
+		if err != nil {
+			return fmt.Errorf("could not add pebble layer: %w", err)
+		}
+
+		goops.LogInfof("Pebble layer created")
 	}
 
 	if restart {
@@ -210,9 +216,7 @@ func syncPebbleService(pebble *client.Client, restart bool) error {
 		goops.LogInfof("Pebble service restarted")
 	}
 
-	goops.LogInfof("Pebble layer added")
-
-	_, err = pebble.Start(&client.ServiceOptions{
+	_, err := pebble.Start(&client.ServiceOptions{
 		Names: []string{"notary"},
 	})
 	if err != nil {
