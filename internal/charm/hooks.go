@@ -28,7 +28,6 @@ const (
 	LoggingIntegrationName     = "logging"
 	TLSRequiresIntegrationName = "access-certificates"
 	TLSProvidesIntegrationName = "certificates"
-	PebbleSocketPath           = "/charm/containers/notary/pebble.socket"
 )
 
 func Configure() error {
@@ -57,11 +56,7 @@ func Configure() error {
 		return fmt.Errorf("could not set ports: %w", err)
 	}
 
-	pebble, err := client.New(&client.Config{Socket: PebbleSocketPath})
-	if err != nil {
-		_ = goops.SetUnitStatus(goops.StatusWaiting, "Could not connect to pebble")
-		return nil
-	}
+	pebble := goops.Pebble("notary")
 
 	err = syncConfig(pebble)
 	if err != nil {
@@ -78,7 +73,7 @@ func Configure() error {
 		return fmt.Errorf("could not sync pebble service: %w", err)
 	}
 
-	configureLogging(pebble)
+	configureLogging()
 
 	err = createAdminAccount(pebble)
 	if err != nil {
@@ -104,7 +99,7 @@ func Configure() error {
 	return nil
 }
 
-func getLoggedInNotaryClient(pebble *client.Client) (*notary.Client, error) {
+func getLoggedInNotaryClient(pebble goops.PebbleClient) (*notary.Client, error) {
 	cert, err := getFileContent(pebble, CertPath)
 	if err != nil {
 		return nil, fmt.Errorf("certificate is not available: %w", err)
@@ -163,9 +158,8 @@ func writePrometheus() error {
 	return nil
 }
 
-func configureLogging(pebble *client.Client) {
+func configureLogging() {
 	i := &logging.Integration{
-		PebbleClient:  pebble,
 		RelationName:  "logging",
 		ContainerName: "notary",
 	}
@@ -177,7 +171,7 @@ func configureLogging(pebble *client.Client) {
 	}
 }
 
-func syncConfig(pebble *client.Client) error {
+func syncConfig(pebble goops.PebbleClient) error {
 	expectedConfig, err := getExpectedConfig()
 	if err != nil {
 		return fmt.Errorf("could not get expected config: %w", err)
@@ -193,10 +187,16 @@ func syncConfig(pebble *client.Client) error {
 	return nil
 }
 
-func syncPebbleService(pebble *client.Client, restart bool) error {
-	err := addPebbleLayer(pebble)
-	if err != nil {
-		return fmt.Errorf("could not add pebble layer: %w", err)
+func syncPebbleService(pebble goops.PebbleClient, restart bool) error {
+	if !pebbleLayerCreated(pebble) {
+		goops.LogInfof("Pebble layer not created")
+
+		err := addPebbleLayer(pebble)
+		if err != nil {
+			return fmt.Errorf("could not add pebble layer: %w", err)
+		}
+
+		goops.LogInfof("Pebble layer created")
 	}
 
 	if restart {
@@ -210,9 +210,7 @@ func syncPebbleService(pebble *client.Client, restart bool) error {
 		goops.LogInfof("Pebble service restarted")
 	}
 
-	goops.LogInfof("Pebble layer added")
-
-	_, err = pebble.Start(&client.ServiceOptions{
+	_, err := pebble.Start(&client.ServiceOptions{
 		Names: []string{"notary"},
 	})
 	if err != nil {
@@ -366,7 +364,7 @@ func integrationCreated(name string) bool {
 	return true
 }
 
-func syncSelfSignedCertificate(pebble *client.Client) (bool, error) {
+func syncSelfSignedCertificate(pebble goops.PebbleClient) (bool, error) {
 	certContent, _ := getFileContent(pebble, CertPath)
 
 	if certContent != "" {
@@ -404,7 +402,7 @@ func syncSelfSignedCertificate(pebble *client.Client) (bool, error) {
 
 // syncTlsProviderCertificate makes a certificate request to the TLS provider
 // and pushes the certificate and key to the pebble client.
-func syncTlsProviderCertificate(pebble *client.Client) (bool, error) {
+func syncTlsProviderCertificate(pebble goops.PebbleClient) (bool, error) {
 	changed := false
 	tlsRequirerIntegration := certificates.IntegrationRequirer{
 		RelationName: TLSRequiresIntegrationName,
@@ -477,7 +475,7 @@ func syncTlsProviderCertificate(pebble *client.Client) (bool, error) {
 	return changed, nil
 }
 
-func syncAccessCertificate(pebble *client.Client) (bool, error) {
+func syncAccessCertificate(pebble goops.PebbleClient) (bool, error) {
 	var changed bool
 
 	var err error
@@ -501,7 +499,7 @@ func syncAccessCertificate(pebble *client.Client) (bool, error) {
 	return changed, nil
 }
 
-func createAdminAccount(pebble *client.Client) error {
+func createAdminAccount(pebble goops.PebbleClient) error {
 	cert, err := getFileContent(pebble, CertPath)
 	if err != nil {
 		return fmt.Errorf("certificate is not available: %w", err)
