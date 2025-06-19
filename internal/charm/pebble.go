@@ -26,8 +26,6 @@ func pushFile(pebble goops.PebbleClient, content string, path string) error {
 		return fmt.Errorf("could not push file: %w", err)
 	}
 
-	fmt.Println("Pushed file to", path)
-
 	return nil
 }
 

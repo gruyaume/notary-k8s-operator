@@ -63,8 +63,6 @@ func Configure() error {
 		return fmt.Errorf("could not sync config: %w", err)
 	}
 
-	fmt.Println("Synced config")
-
 	changed, err := syncAccessCertificate(pebble)
 	if err != nil {
 		return fmt.Errorf("could not sync access certificate: %w", err)
@@ -183,8 +181,6 @@ func syncConfig(pebble goops.PebbleClient) error {
 	if err != nil {
 		return fmt.Errorf("could not push config file: %w", err)
 	}
-
-	fmt.Println("Pushed config file to pebble:", ConfigPath)
 
 	goops.LogInfof("Config file pushed to %s", ConfigPath)
 
