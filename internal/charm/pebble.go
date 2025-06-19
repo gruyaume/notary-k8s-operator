@@ -6,18 +6,19 @@ import (
 	"strings"
 
 	"github.com/canonical/pebble/client"
+	"github.com/gruyaume/goops"
 	"gopkg.in/yaml.v3"
 )
 
-func pushFile(pebbleClient *client.Client, content string, path string) error {
-	_, err := pebbleClient.SysInfo()
+func pushFile(pebble goops.PebbleClient, content string, path string) error {
+	_, err := pebble.SysInfo()
 	if err != nil {
 		return fmt.Errorf("could not connect to pebble: %w", err)
 	}
 
 	source := strings.NewReader(content)
 
-	err = pebbleClient.Push(&client.PushOptions{
+	err = pebble.Push(&client.PushOptions{
 		Source: source,
 		Path:   path,
 	})
@@ -25,13 +26,15 @@ func pushFile(pebbleClient *client.Client, content string, path string) error {
 		return fmt.Errorf("could not push file: %w", err)
 	}
 
+	fmt.Println("Pushed file to", path)
+
 	return nil
 }
 
-func getFileContent(pebbleClient *client.Client, path string) (string, error) {
+func getFileContent(pebble goops.PebbleClient, path string) (string, error) {
 	target := &bytes.Buffer{}
 
-	err := pebbleClient.Pull(&client.PullOptions{
+	err := pebble.Pull(&client.PullOptions{
 		Path:   path,
 		Target: target,
 	})
@@ -81,13 +84,13 @@ type PebblePlan struct {
 	LogTargets map[string]LogTarget     `yaml:"log-targets"`
 }
 
-func pebbleLayerCreated(pebbleClient *client.Client) bool {
-	_, err := pebbleClient.SysInfo()
+func pebbleLayerCreated(pebble goops.PebbleClient) bool {
+	_, err := pebble.SysInfo()
 	if err != nil {
 		return false
 	}
 
-	dataBytes, err := pebbleClient.PlanBytes(nil)
+	dataBytes, err := pebble.PlanBytes(nil)
 	if err != nil {
 		return false
 	}
@@ -111,7 +114,7 @@ func pebbleLayerCreated(pebbleClient *client.Client) bool {
 	return true
 }
 
-func addPebbleLayer(pebbleClient *client.Client) error {
+func addPebbleLayer(pebble goops.PebbleClient) error {
 	layerData, err := yaml.Marshal(PebbleLayer{
 		Summary:     "Notary layer",
 		Description: "pebble config layer for Notary",
@@ -128,7 +131,7 @@ func addPebbleLayer(pebbleClient *client.Client) error {
 		return fmt.Errorf("could not marshal layer data to YAML: %w", err)
 	}
 
-	err = pebbleClient.AddLayer(&client.AddLayerOptions{
+	err = pebble.AddLayer(&client.AddLayerOptions{
 		Combine:   true,
 		Label:     "notary",
 		LayerData: layerData,
