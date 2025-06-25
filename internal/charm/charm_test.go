@@ -15,7 +15,7 @@ func TestGivenNotLeaderWhenConfigureThenBlocked(t *testing.T) {
 		Charm: charm.Configure,
 	}
 
-	stateIn := &goopstest.State{
+	stateIn := goopstest.State{
 		Leader: false,
 	}
 
@@ -24,7 +24,15 @@ func TestGivenNotLeaderWhenConfigureThenBlocked(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if stateOut.UnitStatus != string(goops.StatusBlocked) {
+	if ctx.CharmErr != nil {
+		t.Fatalf("unexpected charm error: %v", ctx.CharmErr)
+	}
+
+	expectedStatus := goopstest.Status{
+		Name:    goopstest.StatusBlocked,
+		Message: "Unit is not leader",
+	}
+	if stateOut.UnitStatus != expectedStatus {
 		t.Errorf("expected status %s, got %s", goops.StatusBlocked, stateOut.UnitStatus)
 	}
 }
@@ -49,7 +57,9 @@ type NotaryConfig struct {
 
 func TestGivenLeaderWhenConfigureThenConfigFileIsPushed(t *testing.T) {
 	ctx := goopstest.Context{
-		Charm: charm.Configure,
+		Charm:   charm.Configure,
+		AppName: "notary",
+		UnitID:  "notary/0",
 	}
 
 	dname, err := os.MkdirTemp("", "sampledir")
@@ -59,9 +69,9 @@ func TestGivenLeaderWhenConfigureThenConfigFileIsPushed(t *testing.T) {
 
 	defer os.RemoveAll(dname)
 
-	stateIn := &goopstest.State{
+	stateIn := goopstest.State{
 		Leader: true,
-		Containers: []*goopstest.Container{
+		Containers: []goopstest.Container{
 			{
 				Name:       "notary",
 				CanConnect: true,
