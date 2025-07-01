@@ -11,18 +11,15 @@ import (
 )
 
 func TestGivenNotLeaderWhenConfigureThenBlocked(t *testing.T) {
-	ctx := goopstest.Context{
-		Charm: charm.Configure,
-	}
+	ctx := goopstest.NewContext(
+		charm.Configure,
+	)
 
 	stateIn := goopstest.State{
 		Leader: false,
 	}
 
-	stateOut, err := ctx.Run("start", stateIn)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	stateOut := ctx.Run("start", stateIn)
 
 	if ctx.CharmErr != nil {
 		t.Fatalf("unexpected charm error: %v", ctx.CharmErr)
@@ -56,11 +53,11 @@ type NotaryConfig struct {
 }
 
 func TestGivenLeaderWhenConfigureThenConfigFileIsPushed(t *testing.T) {
-	ctx := goopstest.Context{
-		Charm:   charm.Configure,
-		AppName: "notary",
-		UnitID:  "notary/0",
-	}
+	ctx := goopstest.NewContext(
+		charm.Configure,
+		goopstest.WithAppName("notary"),
+		goopstest.WithUnitID("notary/0"),
+	)
 
 	dname, err := os.MkdirTemp("", "sampledir")
 	if err != nil {
@@ -85,10 +82,7 @@ func TestGivenLeaderWhenConfigureThenConfigFileIsPushed(t *testing.T) {
 		},
 	}
 
-	_, err = ctx.Run("install", stateIn)
-	if err != nil {
-		t.Fatalf("Run returned an error: %v", err)
-	}
+	_ = ctx.Run("install", stateIn)
 
 	content, err := os.ReadFile(dname + "/etc/notary/config/notary.yaml")
 	if err != nil {
