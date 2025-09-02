@@ -1,9 +1,9 @@
 module github.com/gruyaume/notary-k8s-operator
 
-go 1.24.4
+go 1.24.6
 
 require (
-	github.com/canonical/pebble v1.23.0
+	github.com/canonical/pebble v1.24.0
 	github.com/gruyaume/charm-libraries/certificates v0.0.0-20250701171023-ffdb6331787c
 	github.com/gruyaume/charm-libraries/logging v0.0.0-20250701171023-ffdb6331787c
 	github.com/gruyaume/charm-libraries/prometheus v0.0.0-20250701171023-ffdb6331787c
