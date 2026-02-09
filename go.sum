@@ -1,5 +1,5 @@
-github.com/canonical/pebble v1.27.0 h1:prEVP+SklBrTrrveZUEHkqUY0BeOel7gtP1yLsGIZvU=
-github.com/canonical/pebble v1.27.0/go.mod h1:PcIfhN3+tnvTAurBayr1IBsdfAMj5r1ZV3Tt/ru1qdI=
+github.com/canonical/pebble v1.28.0 h1:Uldw2Kcpua5zYDCwvMbEtYw4wrIDW28hD4/MSVuu3nE=
+github.com/canonical/pebble v1.28.0/go.mod h1:PcIfhN3+tnvTAurBayr1IBsdfAMj5r1ZV3Tt/ru1qdI=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
